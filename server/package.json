@@ -1,0 +1,21 @@
+{
+    "name": "backend",
+    "version": "1.0.0",
+    "description": "",
+    "main": "index.js",
+    "scripts": {
+        "dev": "node --watch src/server.js",
+        "start": "node src/server.js"
+    },
+    "keywords": [],
+    "type": "module",
+    "devDependencies": {
+        "dotenv": "^18.0.1"
+    },
+    "dependencies": {
+        "@clerk/express": "^2.1.69",
+        "cors": "^2.8.6",
+        "express": "^5.2.1",
+        "mongoose": "^9.10.1"
+    }
+}
