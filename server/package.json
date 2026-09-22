@@ -16,6 +16,7 @@
         "@clerk/express": "^2.1.69",
         "cors": "^2.8.6",
         "express": "^5.2.1",
+        "express-rate-limit": "^8.7.0",
         "mongoose": "^9.10.1"
     }
 }
