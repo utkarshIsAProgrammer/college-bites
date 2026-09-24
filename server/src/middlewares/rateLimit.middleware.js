@@ -3,7 +3,7 @@ import { getAuth } from "@clerk/express";
 
 /**
  * Keying strategy for a campus deployment:
- * hundreds of students share a handful of NAT/college-WiFi public IPs, so
+ * hundreds of customers share a handful of NAT/campus-Wi-Fi public IPs, so
  * pure IP limiting would throttle the whole campus collectively. Instead:
  *   - authenticated requests are bucketed per Clerk userId
  *   - unauthenticated requests fall back to IP
@@ -41,7 +41,7 @@ export const globalLimiter = rateLimit({
 /**
  * Sensitive/expensive operations — tighter buckets.
  * Auth: 30 / 5 min per user, 60 / 5 min per IP (covers the /sync storm
- * when a lecture-hall of students signs in at once).
+ * when a lecture-hall of customers signs in at once).
  */
 export const authLimiter = rateLimit({
     windowMs: 5 * 60 * 1000,
@@ -79,5 +79,22 @@ export const orderLimiter = rateLimit({
     message: {
         success: false,
         message: "Order limit reached — please wait before ordering again.",
+    },
+});
+
+/**
+ * Image uploads: 40 / 15 min per user. Each upload costs bandwidth and
+ * Cloudinary credits, so this is tighter than the global ceiling — but
+ * loose enough for a vendor setting up a menu in one sitting.
+ */
+export const uploadLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 40,
+    keyGenerator,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    message: {
+        success: false,
+        message: "Too many uploads — please wait a few minutes.",
     },
 });

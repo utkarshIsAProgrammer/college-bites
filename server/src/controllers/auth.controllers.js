@@ -44,16 +44,22 @@ export const syncUser = async (req, res) => {
         const clerkUser = await clerkClient.users.getUser(userId);
         const email = clerkUser.emailAddresses[0]?.emailAddress;
 
-        const name =
-            `${clerkUser.firstName || ""} ${clerkUser.lastName || ""}`.trim();
-        const profileImage = clerkUser.imageUrl;
+        // Clerk allows nameless accounts (email-OTP signups skip the name
+        // field), so derive a display name instead of rejecting the sync —
+        // an unsynced user would 404 on every order/menu endpoint afterwards.
+        const derivedName =
+            `${clerkUser.firstName || ""} ${clerkUser.lastName || ""}`.trim() ||
+            (email ? email.split("@")[0] : "");
 
-        if (!email || !name) {
+        if (!email || !derivedName) {
             return res.status(400).json({
                 success: false,
                 message: "Required Clerk user information is missing!",
             });
         }
+
+        const name = derivedName.slice(0, 50); // user.model caps name at 50
+        const profileImage = clerkUser.imageUrl;
 
         const user = await User.findOneAndUpdate(
             {
@@ -66,7 +72,7 @@ export const syncUser = async (req, res) => {
                 profileImage,
             },
             {
-                new: true,
+                returnDocument: "after",
                 upsert: true,
             },
         );

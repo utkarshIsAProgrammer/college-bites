@@ -64,11 +64,38 @@ const requireOwnership = async (req, res, canteenId) => {
     return true;
 };
 
-// Get entire menu — public marketplace feed
-// students see available items from OPEN canteens, with vendor names
+// Get entire menu — public marketplace feed: available items from OPEN
+// canteens, with vendor names. Vendors asking for their own canteen (?canteen=<id>)
+// get full fidelity — sold-out lines included — so the dashboard keeps editing them.
 export const getMenu = async (req, res) => {
     try {
         const { category, canteen } = req.query;
+
+        // only meaningful when a valid ?canteen=<id> is present; $in with an
+        // empty array finds nothing, so a stray/malformed id can't over-fetch
+        const mineFilter =
+            canteen && isValidId(canteen)
+                ? canteen.split(",").filter(isValidId)
+                : null;
+
+        // route is public — req.user only exists when the client sent a token
+        if (mineFilter && req.user?._id) {
+            const owned = await Canteen.findOne({ owner: req.user._id })
+                .select("_id")
+                .lean();
+
+            if (owned && mineFilter.includes(String(owned._id))) {
+                const menu = await Menu.find({
+                    canteen: owned._id,
+                    ...(category ? { category } : {}),
+                })
+                    .populate("canteen", "name location isOpen")
+                    .sort({ category: 1, name: 1 })
+                    .lean();
+
+                return res.status(200).json({ success: true, menu });
+            }
+        }
 
         const menu = await Menu.find({
             isAvailable: true,
@@ -134,7 +161,7 @@ export const getMenuItem = async (req, res) => {
 // Create menu item (owner scoped to their own canteen)
 export const createMenuItem = async (req, res) => {
     try {
-        const { name, description, price, category, image } = req.body;
+        const { name, description, price, category, image, isVeg } = req.body;
 
         if (!name || price === undefined || !category) {
             return res.status(400).json({
@@ -159,6 +186,7 @@ export const createMenuItem = async (req, res) => {
             price,
             category,
             image,
+            isVeg: isVeg !== false,
         });
 
         res.status(201).json({
@@ -211,7 +239,9 @@ export const updateMenuItem = async (req, res) => {
             "price",
             "category",
             "image",
+            "prepMins",
             "isAvailable",
+            "isVeg",
         ]) {
             if (req.body[key] !== undefined) updates[key] = req.body[key];
         }
@@ -224,7 +254,7 @@ export const updateMenuItem = async (req, res) => {
         }
 
         const item = await Menu.findByIdAndUpdate(id, updates, {
-            new: true,
+            returnDocument: "after",
             runValidators: true,
         });
 
@@ -243,6 +273,51 @@ export const updateMenuItem = async (req, res) => {
         res.status(500).json({
             success: false,
             message: "Failed to update menu item!",
+        });
+    }
+};
+
+// Bulk availability toggle — mark a whole category (or everything) in/out of stock
+export const bulkSetAvailability = async (req, res) => {
+    try {
+        const { category, isAvailable } = req.body;
+
+        if (typeof isAvailable !== "boolean") {
+            return res.status(400).json({
+                success: false,
+                message: "isAvailable must be true or false!",
+            });
+        }
+
+        const canteen = await Canteen.findOne({ owner: req.user._id })
+            .select("_id")
+            .lean();
+
+        if (!canteen) {
+            return res.status(404).json({
+                success: false,
+                message: "You don't own a canteen!",
+            });
+        }
+
+        const filter = { canteen: canteen._id };
+        if (category) filter.category = category;
+
+        const result = await Menu.updateMany(filter, { isAvailable });
+
+        res.status(200).json({
+            success: true,
+            message: `${result.modifiedCount} item(s) marked ${
+                isAvailable ? "available" : "sold out"
+            }!`,
+            modifiedCount: result.modifiedCount,
+        });
+    } catch (err) {
+        console.error("Bulk availability error:", err);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to update items!",
         });
     }
 };

@@ -1,5 +1,7 @@
 import mongoose from "mongoose";
-import Canteen from "../models/canteen.model.js";
+import Canteen, { IMAGE_CHAR_LIMIT as IMAGE_LIMIT } from "../models/canteen.model.js";
+import Menu from "../models/menu.model.js";
+import Order from "../models/order.model.js";
 import User from "../models/user.model.js";
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
@@ -68,10 +70,12 @@ export const registerCanteen = async (req, res) => {
             await User.findByIdAndUpdate(req.user._id, { role: "staff" });
         }
 
+        const canteenObj = canteen.toObject ? canteen.toObject() : canteen;
+
         res.status(201).json({
             success: true,
             message: "Canteen registered successfully!",
-            canteen,
+            canteen: { ...canteenObj, itemCount: 0 },
         });
     } catch (err) {
         console.error("Register canteen error:", err);
@@ -82,14 +86,26 @@ export const registerCanteen = async (req, res) => {
     }
 };
 
-// my canteen (owner view)
+// my canteen (owner view) — includes the listing count so the vendor side can
+// show setup progress without a second request
 export const getMyCanteen = async (req, res) => {
     try {
         const canteen = await Canteen.findOne({ owner: req.user._id }).lean();
 
+        if (!canteen) {
+            return res.status(200).json({
+                success: true,
+                canteen: null,
+            });
+        }
+
+        const itemCount = await Menu.countDocuments({
+            canteen: canteen._id,
+        });
+
         res.status(200).json({
             success: true,
-            canteen,
+            canteen: { ...canteen, itemCount },
         });
     } catch (err) {
         console.error("Get my canteen error:", err);
@@ -131,6 +147,54 @@ export const updateMyCanteen = async (req, res) => {
             updates.contactPhone = phone;
         }
 
+        // ─── payments ───
+        if (req.body.upiId !== undefined) {
+            const upi = String(req.body.upiId).trim();
+            if (upi && !/^[a-zA-Z0-9._-]{2,64}@[a-zA-Z]{2,32}$/.test(upi)) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid UPI ID — expected format like name@bank.",
+                });
+            }
+            updates.upiId = upi; // empty string removes it
+        }
+
+        if (req.body.qrImageUrl !== undefined) {
+            const qr = String(req.body.qrImageUrl);
+            if (qr && qr.length > IMAGE_LIMIT) {
+                return res.status(400).json({
+                    success: false,
+                    message: "QR image is too large — please upload a smaller image.",
+                });
+            }
+            updates.qrImageUrl = qr; // empty string removes it
+        }
+
+        // ─── profile ───
+        if (req.body.photo !== undefined) {
+            const photo = String(req.body.photo);
+            if (photo && photo.length > IMAGE_LIMIT) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Photo is too large — please upload a smaller image.",
+                });
+            }
+            updates.photo = photo;
+        }
+
+        if (req.body.hours !== undefined) {
+            const h = req.body.hours || {};
+            const hhmm = (v) => !v || /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+            if (!hhmm(h.open) || !hhmm(h.close)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Hours must be HH:MM (24h), e.g. 08:30.",
+                });
+            }
+            updates.hours = { open: h.open || "", close: h.close || "" };
+        }
+
         if (Object.keys(updates).length === 0) {
             return res.status(400).json({
                 success: false,
@@ -141,8 +205,8 @@ export const updateMyCanteen = async (req, res) => {
         const canteen = await Canteen.findOneAndUpdate(
             { owner: req.user._id },
             updates,
-            { new: true, runValidators: true },
-        );
+            { returnDocument: "after", runValidators: true },
+        ).lean();
 
         if (!canteen) {
             return res.status(404).json({
@@ -151,16 +215,61 @@ export const updateMyCanteen = async (req, res) => {
             });
         }
 
+        const itemCount = await Menu.countDocuments({
+            canteen: canteen._id,
+        });
+
         res.status(200).json({
             success: true,
             message: "Canteen updated successfully!",
-            canteen,
+            canteen: { ...canteen, itemCount },
         });
     } catch (err) {
         console.error("Update canteen error:", err);
         res.status(500).json({
             success: false,
             message: "Failed to update canteen!",
+        });
+    }
+};
+
+// public canteen detail — profile + live queue length
+export const getCanteenDetail = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!isValidId(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid canteen id!",
+            });
+        }
+
+        const canteen = await Canteen.findById(id)
+            .select("-owner -createdAt -updatedAt -__v") // includes upiId + QR for payments
+            .lean();
+
+        if (!canteen) {
+            return res.status(404).json({
+                success: false,
+                message: "Canteen not found!",
+            });
+        }
+
+        const queue = await Order.countDocuments({
+            canteen: canteen._id,
+            status: { $in: ["pending", "accepted", "preparing"] },
+        });
+
+        res.status(200).json({
+            success: true,
+            canteen: { ...canteen, queue },
+        });
+    } catch (err) {
+        console.error("Get canteen detail error:", err);
+        res.status(500).json({
+            success: false,
+            message: "Failed to fetch canteen!",
         });
     }
 };
@@ -187,13 +296,45 @@ export const getCanteens = async (req, res) => {
                     itemCount: { $ifNull: [{ $first: "$itemCounts.n" }, 0] },
                 },
             },
+            {
+                // live "in queue" count — same definition as the detail view
+                $lookup: {
+                    from: "orders",
+                    let: { cid: "$_id" },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: { $eq: ["$canteen", "$$cid"] },
+                            },
+                        },
+                        {
+                            $match: {
+                                status: {
+                                    $in: ["pending", "accepted", "preparing"],
+                                },
+                            },
+                        },
+                        { $count: "n" },
+                    ],
+                    as: "queueCounts",
+                },
+            },
+            {
+                $addFields: {
+                    queue: { $ifNull: [{ $first: "$queueCounts.n" }, 0] },
+                },
+            },
             { $sort: { name: 1 } },
             {
                 $project: {
                     name: 1,
                     description: 1,
                     location: 1,
+                    photo: 1,
                     itemCount: 1,
+                    queue: 1,
+                    ratingAvg: 1,
+                    ratingCount: 1,
                 },
             },
         ]);

@@ -30,12 +30,6 @@ const userSchema = new mongoose.Schema(
             default: "customer",
         },
 
-        phone: {
-            type: String,
-            trim: true,
-            maxLength: 10,
-        },
-
         profileImage: {
             type: String,
         },

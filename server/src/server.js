@@ -10,6 +10,8 @@ import { authRoutes } from "./routes/auth.routes.js";
 import { canteenRoutes } from "./routes/canteen.routes.js";
 import { menuRoutes } from "./routes/menu.routes.js";
 import { orderRoutes } from "./routes/order.routes.js";
+import { reviewRoutes } from "./routes/review.routes.js";
+import { uploadRoutes } from "./routes/upload.routes.js";
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -21,7 +23,8 @@ app.use(
         origin: process.env.CLIENT_URL || "http://localhost:5173",
     }),
 );
-app.use(express.json({ limit: "100kb" }));
+app.use(express.json({ limit: "7mb" })); // base64 uploads ride as data URLs — headroom for 5MB client cap + base64 overhead (~33%)
+app.use(express.urlencoded({ limit: "7mb", extended: true }));
 app.use(clerkMiddleware());
 
 // global ceiling — per-user buckets, IP fallback (campus NAT safe)
@@ -41,6 +44,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/canteens", canteenRoutes);
 app.use("/api/menu", menuRoutes);
 app.use("/api/orders", orderRoutes);
+app.use("/api/reviews", reviewRoutes);
+app.use("/api/uploads", uploadRoutes);
 
 // 404 for unknown API routes
 app.use((req, res) => {

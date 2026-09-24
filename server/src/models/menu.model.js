@@ -28,6 +28,12 @@ const menuSchema = new mongoose.Schema(
             min: 0,
         },
 
+        // veg / non-veg indicator (Indian FSSAI-style dot)
+        isVeg: {
+            type: Boolean,
+            default: true,
+        },
+
         category: {
             type: String,
             required: true,
@@ -36,6 +42,15 @@ const menuSchema = new mongoose.Schema(
 
         image: {
             type: String,
+            maxLength: 300_000,
+        },
+
+        // minutes needed to prepare this item (vendor-set, used for pickup estimates)
+        prepMins: {
+            type: Number,
+            min: 0,
+            max: 120,
+            default: 10,
         },
 
         isAvailable: {
