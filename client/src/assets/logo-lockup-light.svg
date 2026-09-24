@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 250 64" width="250" height="64" role="img" aria-label="Rush Bites">
+  <defs>
+    <clipPath id="rbNoodlesD"><circle cx="32" cy="36" r="17"/></clipPath>
+    <linearGradient id="rbGradD" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#F5925A"/>
+      <stop offset="0.55" stop-color="#E8763A"/>
+      <stop offset="1" stop-color="#D75A1E"/>
+    </linearGradient>
+  </defs>
+
+  <!-- plate -->
+  <circle cx="32" cy="36" r="23" fill="none" stroke="#F1EBE0" stroke-width="2.5"/>
+  <circle cx="32" cy="36" r="18" fill="none" stroke="#F1EBE0" stroke-width="1.2" opacity="0.5"/>
+
+  <!-- noodles -->
+  <g clip-path="url(#rbNoodlesD)" stroke="#F1EBE0" stroke-width="2" fill="none" stroke-linecap="round">
+    <path d="M13 33 q6 -5 12 0 t12 0 t12 0"/>
+    <path d="M14 40 q6 -5 12 0 t12 0 t12 0"/>
+    <path d="M17 47 q5 -4 10 0 t10 0"/>
+  </g>
+
+  <!-- fork (tilted left) -->
+  <g fill="#F1EBE0" transform="rotate(-20 32 44)">
+    <rect x="24.75" y="10" width="2.5" height="14" rx="1.25"/>
+    <rect x="30.75" y="10" width="2.5" height="14" rx="1.25"/>
+    <rect x="36.75" y="10" width="2.5" height="14" rx="1.25"/>
+    <path d="M22.5 22.5h19c0 4.4-2.9 7-6.4 7h-6.2c-3.5 0-6.4-2.6-6.4-7z"/>
+    <rect x="29.75" y="28.5" width="4.5" height="25.5" rx="2.25"/>
+  </g>
+
+  <!-- spoon (tilted right, dark outline separates it) -->
+  <g fill="#F1EBE0" stroke="#14110C" stroke-width="1.5" transform="rotate(20 32 44)">
+    <ellipse cx="32" cy="16.5" rx="6.2" ry="8.5"/>
+    <rect x="29.75" y="27" width="4.5" height="27" rx="2.25"/>
+  </g>
+
+  <!-- ember garnish -->
+  <circle cx="32" cy="6" r="2.5" fill="#E8763A"/>
+
+  <!-- motion streaks: trailing speed lines -->
+  <g stroke="#E8763A" stroke-width="2.4" stroke-linecap="round">
+    <line x1="216" y1="26" x2="240" y2="26" opacity="0.85"/>
+    <line x1="220" y1="32" x2="236" y2="32" opacity="0.5"/>
+    <line x1="224" y1="38" x2="232" y2="38" opacity="0.28"/>
+  </g>
+
+  <!-- wordmark: italic serif "Rush" with an ember gradient -->
+  <text x="74" y="40" font-family="'Fraunces', Georgia, serif" font-size="30" font-weight="700" font-style="italic" letter-spacing="0.2" fill="url(#rbGradD)">Rush</text>
+
+  <!-- "BITES" — spaced caps, light ink -->
+  <text x="150" y="40" font-family="'Inter', system-ui, sans-serif" font-size="15" font-weight="800" letter-spacing="2.5" fill="#F1EBE0">BITES</text>
+
+  <!-- tagline -->
+  <text x="75" y="56" font-family="'Inter', system-ui, sans-serif" font-size="8.5" font-weight="600" letter-spacing="3.4" fill="#B8AE9E">SKIP THE QUEUE</text>
+</svg>

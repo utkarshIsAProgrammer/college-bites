@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Rush Bites logo mark on dark backgrounds">
+  <!-- ember morsel -->
+  <circle cx="32" cy="11.5" r="2.5" fill="#F7F4EE"/>
+
+  <!-- fork (tilted left) -->
+  <g fill="#F7F4EE" transform="rotate(-20 32 44)">
+    <rect x="24.75" y="10" width="2.5" height="14" rx="1.25"/>
+    <rect x="30.75" y="10" width="2.5" height="14" rx="1.25"/>
+    <rect x="36.75" y="10" width="2.5" height="14" rx="1.25"/>
+    <path d="M22.5 22.5h19c0 4.4-2.9 7-6.4 7h-6.2c-3.5 0-6.4-2.6-6.4-7z"/>
+    <rect x="29.75" y="28.5" width="4.5" height="25.5" rx="2.25"/>
+  </g>
+
+  <!-- spoon (tilted right, dark outline separates it from the fork) -->
+  <g fill="#F7F4EE" stroke="#14110C" stroke-width="1.5" transform="rotate(20 32 44)">
+    <ellipse cx="32" cy="16.5" rx="6.2" ry="8.5"/>
+    <rect x="29.75" y="27" width="4.5" height="27" rx="2.25"/>
+  </g>
+</svg>

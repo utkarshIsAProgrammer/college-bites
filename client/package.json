@@ -1,0 +1,21 @@
+{
+  "name": "rushbites-client",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite build && vite preview"
+  },
+  "dependencies": {
+    "@clerk/clerk-react": "^5.46.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-qr-code": "^2.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "vite": "^7.1.0"
+  }
+}
