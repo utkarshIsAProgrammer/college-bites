@@ -1,0 +1,68 @@
+# Render blueprint — one API web service + one static site.
+# Deploy: push this file, then "New → Blueprint" in the Render dashboard.
+# Secrets marked sync: false must be filled in the Render dashboard.
+
+services:
+  - type: web
+    name: preplate-api
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGO_URI
+        sync: false
+      - key: CLIENT_URL
+        value: https://preplate-client.onrender.com
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      # Web Push — generate once:
+      #   node -e "console.log(JSON.stringify(require('web-push').generateVAPIDKeys()))"
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        value: https://preplate.app
+      # Optional: Upstash Redis (REST, not TCP) for shared rate limits + caching
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+
+  - type: web
+    name: preplate-client
+    runtime: static
+    rootDir: client
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    pullRequestPreviewsEnabled: false
+    routes:
+      # SPA — every path serves the shell
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        value: https://preplate-api.onrender.com
+      - key: VITE_CLERK_PUBLISHABLE_KEY
+        sync: false
+    headers:
+      # never cache the shell — SW handles versioning
+      - path: /index.html
+        name: Cache-Control
+        value: no-cache
+      # long-cache hashed assets
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
