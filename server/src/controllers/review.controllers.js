@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Review from "../models/review.model.js";
 import Canteen from "../models/canteen.model.js";
 import Order from "../models/order.model.js";
+import { bumpVersion, cached } from "../lib/redis.js";
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
@@ -96,6 +97,14 @@ export const createReview = async (req, res) => {
 
         const summary = await refreshCanteenRating(order.canteen);
 
+        // the rating shows on marketplace cards and the reviews list in the
+        // profile modal — refresh both caches. Versions live at the namespace
+        // root, so bumping "reviews" invalidates every canteen's review list.
+        Promise.all([
+            bumpVersion("canteens"),
+            bumpVersion("reviews"),
+        ]).catch(() => {});
+
         res.status(201).json({
             success: true,
             message: "Thanks for the review!",
@@ -131,11 +140,13 @@ export const getCanteenReviews = async (req, res) => {
             });
         }
 
-        const reviews = await Review.find({ canteen: id })
-            .sort({ createdAt: -1 })
-            .limit(REVIEW_PAGE_SIZE)
-            .populate("customer", "name")
-            .lean();
+        const { data: reviews } = await cached(`reviews:${id}:list`, 60, async () =>
+            Review.find({ canteen: id })
+                .sort({ createdAt: -1 })
+                .limit(REVIEW_PAGE_SIZE)
+                .populate("customer", "name")
+                .lean(),
+        );
 
         res.status(200).json({
             success: true,

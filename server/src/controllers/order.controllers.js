@@ -5,12 +5,26 @@ import Order from "../models/order.model.js";
 import Canteen from "../models/canteen.model.js";
 import Counter from "../models/counter.model.js";
 import Review from "../models/review.model.js";
+import { sendPushToUser } from "../lib/push.js";
 
 const MAX_QTY_PER_ITEM = 20;
 const MAX_DISTINCT_ITEMS = 30;
 const ORDERS_PAGE_SIZE = 50;
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
+
+// fire-and-forget vendor push — a slow/dead push service must never hold up
+// the API response; errors are logged inside sendPushToUser
+const pushVendor = (canteenDoc, title, body, tag, url) => {
+    if (!canteenDoc?.owner) return;
+    sendPushToUser(canteenDoc.owner, {
+        kind: "orders",
+        title,
+        body,
+        tag,
+        url,
+    }).catch(() => {});
+};
 
 // allowed vendor status transitions
 const TRANSITIONS = {
@@ -74,12 +88,16 @@ export const createOrder = async (req, res) => {
             );
         }
 
-        // ONE batched query; canteen included for the single-vendor check
+        // ONE batched query; canteen included for the single-vendor check.
+        // Availability (isAvailable) is checked here; time-bound windows are
+        // checked per-item below against the server clock (client can't fake it).
         const menus = await Menu.find({
             _id: { $in: [...quantityByItem.keys()] },
             isAvailable: true,
         })
-            .select("name price canteen prepMins")
+            .select(
+                "name price canteen prepMins isVeg availableFrom availableTo",
+            )
             .lean();
 
         if (menus.length !== quantityByItem.size) {
@@ -88,6 +106,32 @@ export const createOrder = async (req, res) => {
                 message:
                     "One or more menu items are unavailable or do not exist!",
             });
+        }
+
+        // time-bound items: reject ordering outside their window
+        const now = new Date();
+        for (const menu of menus) {
+            if (menu.availableFrom && menu.availableTo) {
+                const toMins = (t) => {
+                    const [h, m] = String(t).split(":").map(Number);
+                    return (h || 0) * 60 + (m || 0);
+                };
+                const cur = now.getHours() * 60 + now.getMinutes();
+                const from = toMins(menu.availableFrom);
+                const to = toMins(menu.availableTo);
+                const inWindow =
+                    to === from
+                        ? true
+                        : to > from
+                          ? cur >= from && cur < to
+                          : cur >= from || cur < to;
+                if (!inWindow) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `"${menu.name}" is only available ${menu.availableFrom}–${menu.availableTo}.`,
+                    });
+                }
+            }
         }
 
         // one canteen per order
@@ -100,9 +144,10 @@ export const createOrder = async (req, res) => {
             });
         }
 
-        // the vendor must be open for business
+        // the vendor must be open for business — owner id rides along for
+        // the new-order push (fire-and-forget, after the response below)
         const canteen = await Canteen.findById([...canteenIds][0])
-            .select("isOpen name upiId qrImageUrl")
+            .select("isOpen name upiId qrImageUrl owner")
             .lean();
 
         if (!canteen || !canteen.isOpen) {
@@ -172,6 +217,22 @@ export const createOrder = async (req, res) => {
                 state: "pending",
             },
         });
+
+        // customer-facing summary of the cart for the vendor's push
+        const orderSummary =
+            orderItems.length > 1
+                ? `${orderItems[0].name} +${orderItems.length - 1} more`
+                : orderItems[0]?.name || "New order";
+
+        pushVendor(
+            canteen,
+            `New order #${counter.seq}`,
+            `${orderSummary} — ₹${totalAmount}${
+                method === "upi_qr" ? " · UPI" : " · cash"
+            }`,
+            `order-${canteen._id}`,
+            "/vendor",
+        );
 
         res.status(201).json({
             success: true,
@@ -371,6 +432,22 @@ export const cancelOrder = async (req, res) => {
             });
         }
 
+        // vendor needs to know an order just left their queue (fire-and-forget;
+        // order.canteen is a bare ObjectId, so look up the owner first)
+        Canteen.findById(order.canteen)
+            .select("owner")
+            .lean()
+            .then((c) =>
+                pushVendor(
+                    c,
+                    `Order #${order.tokenNumber} cancelled`,
+                    "The customer cancelled before preparation started.",
+                    `order-${order.canteen}`,
+                    "/vendor",
+                ),
+            )
+            .catch(() => {});
+
         res.status(200).json({
             success: true,
             message: "Order cancelled successfully!",
@@ -392,7 +469,10 @@ export const submitPayment = async (req, res) => {
         const { id } = req.params;
         const { reference } = req.body;
 
-        const ref = String(reference || "").trim();
+        // schema caps payment.reference at 60 — slice here too, since this
+        // update doesn't run mongoose validators (runValidators absent), so
+        // an unsliced string could store megabytes per order
+        const ref = String(reference || "").trim().slice(0, 60);
         if (ref.length < 6) {
             return res.status(400).json({
                 success: false,
@@ -426,9 +506,25 @@ export const submitPayment = async (req, res) => {
             });
         }
 
+        // vendor must verify the UTR — nudge them (fire-and-forget; bare
+        // ObjectId canteen, so resolve the owner first)
+        Canteen.findById(order.canteen)
+            .select("owner")
+            .lean()
+            .then((c) =>
+                pushVendor(
+                    c,
+                    `Payment proof for #${order.tokenNumber}`,
+                    "Customer submitted a UPI reference — verify it in the queue.",
+                    `payment-${order.canteen}`,
+                    "/vendor",
+                ),
+            )
+            .catch(() => {});
+
         res.status(200).json({
             success: true,
-            message: "Payment reference submitted — the vendor will confirm.",
+            message: "Payment proof submitted — the vendor will confirm.",
             order,
         });
     } catch (err) {
@@ -535,6 +631,42 @@ export const updateOrderStatus = async (req, res) => {
             { returnDocument: "after" },
         ).lean();
 
+        // customer-facing status pushes (fire-and-forget; order.customer is
+        // the buyer's ObjectId, so sendPushToUser takes it directly)
+        const STATUS_PUSH = {
+            accepted: {
+                title: `Order #${order.tokenNumber} accepted`,
+                body: `${canteen.name} is on it — we'll ping you when it's ready.`,
+            },
+            preparing: {
+                title: `Order #${order.tokenNumber} is being prepared`,
+                body: `${canteen.name} has started cooking your food.`,
+            },
+            ready: {
+                title: "Your food is ready!",
+                body: `Token #${order.tokenNumber} — pick it up at ${canteen.name}.`,
+            },
+            completed: {
+                title: `Order #${order.tokenNumber} completed`,
+                body: `Enjoy your meal! Rate it to help other students.`,
+            },
+            cancelled: {
+                title: `Order #${order.tokenNumber} cancelled`,
+                body: `${canteen.name} couldn't fulfill this order.`,
+            },
+        };
+
+        const push = STATUS_PUSH[status];
+        if (push) {
+            sendPushToUser(order.customer, {
+                kind: status === "ready" ? "ready" : "orders",
+                title: push.title,
+                body: push.body,
+                tag: `order-${order._id}`,
+                url: "/orders",
+            }).catch(() => {});
+        }
+
         res.status(200).json({
             success: true,
             message: `Order marked ${status}.`,
@@ -593,6 +725,21 @@ export const confirmPayment = async (req, res) => {
                 message: "Order not found or payment already settled!",
             });
         }
+
+        // customer push on payment outcome (fire-and-forget)
+        sendPushToUser(order.customer, {
+            kind: "orders",
+            title:
+                outcome === "confirmed"
+                    ? `Payment confirmed for #${order.tokenNumber}`
+                    : `Payment issue with #${order.tokenNumber}`,
+            body:
+                outcome === "confirmed"
+                    ? `${canteen.name} verified your payment — your order is in the queue.`
+                    : `${canteen.name} couldn't verify your payment — show the counter your UPI receipt.`,
+            tag: `payment-${order._id}`,
+            url: "/orders",
+        }).catch(() => {});
 
         res.status(200).json({
             success: true,
@@ -666,6 +813,95 @@ export const getVendorStats = async (req, res) => {
             { $limit: 5 },
         ]);
 
+        // ─── 7-day trend (per-day orders + revenue, oldest → newest) ───
+        const weekStart = new Date();
+        weekStart.setHours(0, 0, 0, 0);
+        weekStart.setDate(weekStart.getDate() - 6);
+
+        const trendRows = await Order.aggregate([
+            {
+                $match: {
+                    canteen: canteen._id,
+                    createdAt: { $gte: weekStart },
+                    status: { $nin: ["cancelled"] },
+                },
+            },
+            {
+                $group: {
+                    _id: {
+                        $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+                    },
+                    orders: { $sum: 1 },
+                    revenue: { $sum: "$totalAmount" },
+                },
+            },
+        ]);
+
+        // fill the 7 buckets so the chart has no gaps
+        const trend = [];
+        for (let i = 6; i >= 0; i--) {
+            const d = new Date();
+            d.setHours(0, 0, 0, 0);
+            d.setDate(d.getDate() - i);
+            const key = d.toISOString().slice(0, 10);
+            const row = trendRows.find((r) => r._id === key);
+            trend.push({
+                day: d.toLocaleDateString(undefined, { weekday: "short" }),
+                orders: row?.orders || 0,
+                revenue: row?.revenue || 0,
+            });
+        }
+
+        // ─── peak hours (last 14 days, order count by hour of day) ───
+        const fortnightStart = new Date();
+        fortnightStart.setHours(0, 0, 0, 0);
+        fortnightStart.setDate(fortnightStart.getDate() - 13);
+
+        const hourRows = await Order.aggregate([
+            {
+                $match: {
+                    canteen: canteen._id,
+                    createdAt: { $gte: fortnightStart },
+                    status: { $nin: ["cancelled"] },
+                },
+            },
+            {
+                $group: {
+                    _id: { $hour: "$createdAt" },
+                    orders: { $sum: 1 },
+                },
+            },
+            { $sort: { orders: -1 } },
+            { $limit: 3 },
+        ]);
+
+        const peakHours = hourRows.map((r) => ({
+            hour: r._id,
+            label: `${String(r._id).padStart(2, "0")}:00`,
+            orders: r.orders,
+        }));
+
+        // ─── cancellation rate (last 7 days, incl. cancelled) ───
+        const [cancelRow] = await Order.aggregate([
+            {
+                $match: {
+                    canteen: canteen._id,
+                    createdAt: { $gte: weekStart },
+                },
+            },
+            {
+                $group: {
+                    _id: null,
+                    total: { $sum: 1 },
+                    cancelled: {
+                        $sum: {
+                            $cond: [{ $eq: ["$status", "cancelled"] }, 1, 0],
+                        },
+                    },
+                },
+            },
+        ]);
+
         res.status(200).json({
             success: true,
             stats: {
@@ -673,6 +909,10 @@ export const getVendorStats = async (req, res) => {
                 revenue: summary?.revenue || 0,
                 pendingPayments: summary?.pendingPayments || 0,
                 topItems,
+                trend,
+                peakHours,
+                cancelled: cancelRow?.cancelled || 0,
+                totalWeek: cancelRow?.total || 0,
             },
         });
     } catch (err) {

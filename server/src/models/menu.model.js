@@ -57,10 +57,47 @@ const menuSchema = new mongoose.Schema(
             type: Boolean,
             default: true,
         },
+
+        // ─── time-bound availability ("samosas 11am–2pm only") ───
+        // HH:MM strings; both empty = available all day. The public listing
+        // and order placement validate against the current server time.
+        availableFrom: {
+            type: String,
+            trim: true,
+            validate: {
+                validator: (v) => !v || /^([01]\d|2[0-3]):[0-5]\d$/.test(v),
+                message: "availableFrom must be HH:MM",
+            },
+        },
+
+        availableTo: {
+            type: String,
+            trim: true,
+            validate: {
+                validator: (v) => !v || /^([01]\d|2[0-3]):[0-5]\d$/.test(v),
+                message: "availableTo must be HH:MM",
+            },
+        },
     },
 
     { timestamps: true },
 );
+
+// is this item orderable at the given time (defaults to now)?
+// handles overnight windows (22:00–02:00) like canteen hours do
+menuSchema.methods.isOrderableAt = function (when = new Date()) {
+    if (!this.isAvailable) return false;
+    if (!this.availableFrom || !this.availableTo) return true;
+    const toMins = (t) => {
+        const [h, m] = String(t).split(":").map(Number);
+        return (h || 0) * 60 + (m || 0);
+    };
+    const cur = when.getHours() * 60 + when.getMinutes();
+    const from = toMins(this.availableFrom);
+    const to = toMins(this.availableTo);
+    if (to === from) return true; // zero window = all day
+    return to > from ? cur >= from && cur < to : cur >= from || cur < to;
+};
 
 // query patterns: public menu listing (isAvailable + category filter,
 // sorted by category/name), order-time lookups by id + availability,

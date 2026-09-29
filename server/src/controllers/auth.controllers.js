@@ -22,7 +22,7 @@ export const authenticate = async (req, res) => {
             clerkUser,
         });
     } catch (err) {
-        console.log(`Auth error: ${err}`);
+        console.error(`Auth error: ${err.message}`);
 
         res.status(500).json({
             success: false,
@@ -83,12 +83,11 @@ export const syncUser = async (req, res) => {
             user,
         });
     } catch (err) {
-        console.log(`User sync error: ${err}`);
+        console.error("User sync error:", err.message);
 
         res.status(500).json({
             success: false,
             message: "Failed to sync user!",
-            error: err.message,
         });
     }
 };

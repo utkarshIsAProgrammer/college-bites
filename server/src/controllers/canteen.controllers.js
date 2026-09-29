@@ -3,6 +3,12 @@ import Canteen, { IMAGE_CHAR_LIMIT as IMAGE_LIMIT } from "../models/canteen.mode
 import Menu from "../models/menu.model.js";
 import Order from "../models/order.model.js";
 import User from "../models/user.model.js";
+import { bumpVersion, cached } from "../lib/redis.js";
+
+// cache namespaces — every canteen write bumps these so the public reads
+// (marketplace list, detail, menu) refresh on the next request
+const bustCanteenCaches = () =>
+    Promise.all([bumpVersion("canteens"), bumpVersion("menu")]).catch(() => {});
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
@@ -56,14 +62,31 @@ export const registerCanteen = async (req, res) => {
             });
         }
 
+        // optional canteen photo at registration — same inline budget as updates
+        let photo;
+        if (req.body.photo !== undefined && String(req.body.photo)) {
+            const p = String(req.body.photo);
+            if (p.length > IMAGE_LIMIT) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Photo is too large — please upload a smaller image or skip it (you can add it later in settings).",
+                });
+            }
+            photo = p;
+        }
+
         const canteen = await Canteen.create({
             name: String(name).trim(),
             description,
             location,
             contactName: String(contactName).trim(),
             contactPhone: phone,
+            ...(photo && { photo }),
             owner: req.user._id,
         });
+
+        bustCanteenCaches(); // a new canteen joins the marketplace
 
         // owners need menu-write access; never demote an existing admin
         if (req.user.role === "customer") {
@@ -219,6 +242,8 @@ export const updateMyCanteen = async (req, res) => {
             canteen: canteen._id,
         });
 
+        bustCanteenCaches(); // hours/photo/payments changed — refresh public reads
+
         res.status(200).json({
             success: true,
             message: "Canteen updated successfully!",
@@ -233,7 +258,9 @@ export const updateMyCanteen = async (req, res) => {
     }
 };
 
-// public canteen detail — profile + live queue length
+// public canteen detail — profile + live queue length. The profile half is
+// cached 60s per canteen; the queue count stays live since it feeds the
+// "how busy is this place" decision right before ordering.
 export const getCanteenDetail = async (req, res) => {
     try {
         const { id } = req.params;
@@ -245,9 +272,16 @@ export const getCanteenDetail = async (req, res) => {
             });
         }
 
-        const canteen = await Canteen.findById(id)
-            .select("-owner -createdAt -updatedAt -__v") // includes upiId + QR for payments
-            .lean();
+        const { data: canteen } = await cached(
+            `canteens:detail:${id}`,
+            60,
+            async () => {
+                const row = await Canteen.findById(id)
+                    .select("-owner -createdAt -updatedAt -__v") // includes upiId + QR for payments
+                    .lean();
+                return row;
+            },
+        );
 
         if (!canteen) {
             return res.status(404).json({
@@ -274,10 +308,14 @@ export const getCanteenDetail = async (req, res) => {
     }
 };
 
-// public marketplace — all open canteens with live item counts
+// public marketplace — all open canteens with live item counts.
+// Redis-cached for 60s (bumped on any canteen write); the live queue
+// numbers stay on the client's own polling cycle, so a minute of cache
+// costs nothing here.
 export const getCanteens = async (req, res) => {
     try {
-        const canteens = await Canteen.aggregate([
+        const { data: canteens } = await cached("canteens:list", 60, async () => {
+            const rows = await Canteen.aggregate([
             { $match: { isOpen: true } },
             {
                 $lookup: {
@@ -324,20 +362,24 @@ export const getCanteens = async (req, res) => {
                     queue: { $ifNull: [{ $first: "$queueCounts.n" }, 0] },
                 },
             },
-            { $sort: { name: 1 } },
-            {
-                $project: {
-                    name: 1,
-                    description: 1,
-                    location: 1,
-                    photo: 1,
-                    itemCount: 1,
-                    queue: 1,
-                    ratingAvg: 1,
-                    ratingCount: 1,
+                { $sort: { name: 1 } },
+                {
+                    $project: {
+                        name: 1,
+                        description: 1,
+                        location: 1,
+                        photo: 1,
+                        hours: 1,
+                        isOpen: 1,
+                        itemCount: 1,
+                        queue: 1,
+                        ratingAvg: 1,
+                        ratingCount: 1,
+                    },
                 },
-            },
-        ]);
+            ]);
+            return rows;
+        });
 
         res.status(200).json({
             success: true,

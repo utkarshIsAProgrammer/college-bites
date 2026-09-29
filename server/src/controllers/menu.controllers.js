@@ -1,6 +1,12 @@
 import mongoose from "mongoose";
 import Menu from "../models/menu.model.js";
 import Canteen from "../models/canteen.model.js";
+import { bumpVersion, cached } from "../lib/redis.js";
+
+// menu writes invalidate both the menu feed and the canteen cards
+// (item counts live there)
+const bustMenuCaches = () =>
+    Promise.all([bumpVersion("menu"), bumpVersion("canteens")]).catch(() => {});
 
 // helper: is this a well-formed ObjectId?
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
@@ -71,11 +77,22 @@ export const getMenu = async (req, res) => {
     try {
         const { category, canteen } = req.query;
 
+        // ─── query-param hardening ───
+        // Express hands ?x[$ne]=1 to Mongo as an OBJECT — passed through
+        // unchecked it becomes a NoSQL operator injection ({$ne: null} matches
+        // every doc), and stringifying it into the cache key would let one
+        // poisoned entry serve every other injected filter. Drop non-strings.
+        const categoryParam =
+            typeof category === "string" && category.trim()
+                ? category.trim().slice(0, 50)
+                : null;
+        const canteenParam = typeof canteen === "string" ? canteen : null;
+
         // only meaningful when a valid ?canteen=<id> is present; $in with an
         // empty array finds nothing, so a stray/malformed id can't over-fetch
         const mineFilter =
-            canteen && isValidId(canteen)
-                ? canteen.split(",").filter(isValidId)
+            canteenParam && isValidId(canteenParam)
+                ? canteenParam.split(",").filter(isValidId)
                 : null;
 
         // route is public — req.user only exists when the client sent a token
@@ -97,14 +114,33 @@ export const getMenu = async (req, res) => {
             }
         }
 
-        const menu = await Menu.find({
-            isAvailable: true,
-            ...(category ? { category } : {}),
-            ...(canteen && isValidId(canteen) ? { canteen } : {}),
-        })
-            .populate("canteen", "name location isOpen")
-            .sort({ category: 1, name: 1 })
-            .lean();
+        // public feed — Redis-cached 60s per (canteen-list, category) combo;
+        // vendor "mine" reads above stay uncached so dashboards are instant
+        // a comma-separated ?canteen= list filters to those canteens; a stray
+        // id in the list is ignored, an all-invalid list matches nothing
+        const canteenFilter = canteenParam
+            ? canteenParam.split(",").filter(isValidId)
+            : null;
+
+        // cache key: "all" (no filter) / "none" (all ids invalid — must NOT
+        // share the "all" slot, or a garbage filter would hit the full menu)
+        const listKey = canteenFilter
+            ? canteenFilter.join(",") || "none"
+            : "all";
+
+        const { data: menu } = await cached(
+            `menu:pub:${listKey}:${categoryParam || "all"}`,
+            60,
+            async () =>
+                Menu.find({
+                    isAvailable: true,
+                    ...(categoryParam ? { category: categoryParam } : {}),
+                    ...(canteenFilter ? { canteen: { $in: canteenFilter } } : {}),
+                })
+                    .populate("canteen", "name location isOpen")
+                    .sort({ category: 1, name: 1 })
+                    .lean(),
+        );
 
         res.status(200).json({
             success: true,
@@ -187,7 +223,15 @@ export const createMenuItem = async (req, res) => {
             category,
             image,
             isVeg: isVeg !== false,
+            ...(req.body.availableFrom !== undefined && {
+                availableFrom: req.body.availableFrom,
+            }),
+            ...(req.body.availableTo !== undefined && {
+                availableTo: req.body.availableTo,
+            }),
         });
+
+        bustMenuCaches();
 
         res.status(201).json({
             success: true,
@@ -242,6 +286,8 @@ export const updateMenuItem = async (req, res) => {
             "prepMins",
             "isAvailable",
             "isVeg",
+            "availableFrom",
+            "availableTo",
         ]) {
             if (req.body[key] !== undefined) updates[key] = req.body[key];
         }
@@ -257,6 +303,8 @@ export const updateMenuItem = async (req, res) => {
             returnDocument: "after",
             runValidators: true,
         });
+
+        bustMenuCaches();
 
         res.status(200).json({
             success: true,
@@ -289,6 +337,13 @@ export const bulkSetAvailability = async (req, res) => {
             });
         }
 
+        // same operator-injection hardening as getMenu — an object here would
+        // become a Mongo filter, not a category name
+        const categoryParam =
+            typeof category === "string" && category.trim()
+                ? category.trim().slice(0, 50)
+                : null;
+
         const canteen = await Canteen.findOne({ owner: req.user._id })
             .select("_id")
             .lean();
@@ -301,9 +356,11 @@ export const bulkSetAvailability = async (req, res) => {
         }
 
         const filter = { canteen: canteen._id };
-        if (category) filter.category = category;
+        if (categoryParam) filter.category = categoryParam;
 
         const result = await Menu.updateMany(filter, { isAvailable });
+
+        bustMenuCaches();
 
         res.status(200).json({
             success: true,
@@ -346,6 +403,8 @@ export const deleteMenuItem = async (req, res) => {
         if (!(await requireOwnership(req, res, existing.canteen))) return;
 
         const item = await Menu.findByIdAndDelete(id);
+
+        bustMenuCaches();
 
         res.status(200).json({
             success: true,

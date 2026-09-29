@@ -58,11 +58,11 @@ async function loginToken(clerkId, name) {
 }
 
 const OWNERS = [
-  { clerkId: "clerk-seed-1", first: "Asha", last: "R", email: "asha@rushbites.io" },
-  { clerkId: "clerk-seed-2", first: "Ravi", last: "K", email: "ravi@rushbites.io" },
-  { clerkId: "clerk-seed-3", first: "Neha", last: "S", email: "neha@rushbites.io" },
-  { clerkId: "clerk-seed-4", first: "Sandeep", last: "P", email: "sandeep@rushbites.io" },
-  { clerkId: "clerk-seed-5", first: "Priya", last: "M", email: "priya@rushbites.io" },
+  { clerkId: "clerk-seed-1", first: "Asha", last: "R", email: "asha@preplate.io" },
+  { clerkId: "clerk-seed-2", first: "Ravi", last: "K", email: "ravi@preplate.io" },
+  { clerkId: "clerk-seed-3", first: "Neha", last: "S", email: "neha@preplate.io" },
+  { clerkId: "clerk-seed-4", first: "Sandeep", last: "P", email: "sandeep@preplate.io" },
+  { clerkId: "clerk-seed-5", first: "Priya", last: "M", email: "priya@preplate.io" },
 ];
 
 // name, location, contactName, contactPhone
@@ -150,11 +150,11 @@ const CATENDERS = [
 ];
 
 const CATENDERS_BY_EMAIL = {
-  "asha@rushbites.io": "Ashok Canteen",
-  "ravi@rushbites.io": "Ravi's Royal Kitchen",
-  "neha@rushbites.io": "Neha's Noodle Lane",
-  "sandeep@rushbites.io": "Sandeep's Spice Court",
-  "priya@rushbites.io": "Priya's South Bowl",
+  "asha@preplate.io": "Ashok Canteen",
+  "ravi@preplate.io": "Ravi's Royal Kitchen",
+  "neha@preplate.io": "Neha's Noodle Lane",
+  "sandeep@preplate.io": "Sandeep's Spice Court",
+  "priya@preplate.io": "Priya's South Bowl",
 };
 
 async function main() {

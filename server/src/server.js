@@ -11,6 +11,7 @@ import { canteenRoutes } from "./routes/canteen.routes.js";
 import { menuRoutes } from "./routes/menu.routes.js";
 import { orderRoutes } from "./routes/order.routes.js";
 import { reviewRoutes } from "./routes/review.routes.js";
+import { pushRoutes } from "./routes/push.routes.js";
 import { uploadRoutes } from "./routes/upload.routes.js";
 
 const app = express();
@@ -45,6 +46,7 @@ app.use("/api/canteens", canteenRoutes);
 app.use("/api/menu", menuRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/reviews", reviewRoutes);
+app.use("/api/push", pushRoutes);
 app.use("/api/uploads", uploadRoutes);
 
 // 404 for unknown API routes
