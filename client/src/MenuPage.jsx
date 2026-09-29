@@ -5,6 +5,13 @@ import { useCart } from "./CartContext.jsx";
 import { useToast } from "./toast.jsx";
 import Reveal from "./Reveal.jsx";
 import VegDot from "./VegDot.jsx";
+import {
+    ClockIcon,
+    FoodIcon,
+    MinusIcon,
+    PlusIcon,
+    SearchIcon,
+} from "./icons.jsx";
 
 function MenuSkeleton() {
     return (
@@ -22,7 +29,7 @@ function Thumb({ item }) {
             <img
                 className="product-img"
                 src={item.image}
-                alt=""
+                alt={item.name}
                 loading="lazy"
                 onError={(e) => {
                     e.currentTarget.style.display = "none";
@@ -30,7 +37,11 @@ function Thumb({ item }) {
             />
         );
     }
-    return <div className="thumb-fallback">🍽</div>;
+    return (
+        <div className="thumb-fallback">
+            <FoodIcon />
+        </div>
+    );
 }
 
 /**
@@ -49,6 +60,7 @@ export default function MenuPage({ focusCanteenId, onClearFocus }) {
 
     const [search, setSearch] = useState("");
     const [category, setCategory] = useState("All");
+    const [vegOnly, setVegOnly] = useState(false);
 
     const load = useCallback(async () => {
         setListLoading(true);
@@ -94,13 +106,32 @@ export default function MenuPage({ focusCanteenId, onClearFocus }) {
         const q = search.trim().toLowerCase();
         return items
             .filter((item) => category === "All" || item.category === category)
+            .filter((item) => !vegOnly || item.isVeg)
             .filter(
                 (item) =>
                     !q ||
                     item.name.toLowerCase().includes(q) ||
                     (item.description || "").toLowerCase().includes(q),
             );
-    }, [items, search, category]);
+    }, [items, search, category, vegOnly]);
+
+    // items outside their daily window ("11:00–14:00 only") count as
+    // unavailable — same overnight-window rule the server enforces at order time
+    const inWindow = (item) => {
+        if (!item.availableFrom || !item.availableTo) return true;
+        const toMins = (t) => {
+            const [h, m] = String(t).split(":").map(Number);
+            return (h || 0) * 60 + (m || 0);
+        };
+        const now = new Date();
+        const cur = now.getHours() * 60 + now.getMinutes();
+        const from = toMins(item.availableFrom);
+        const to = toMins(item.availableTo);
+        if (to === from) return true;
+        return to > from
+            ? cur >= from && cur < to
+            : cur >= from || cur < to;
+    };
 
     const grouped = useMemo(() => {
         const map = new Map();
@@ -183,7 +214,9 @@ export default function MenuPage({ focusCanteenId, onClearFocus }) {
 
                         <div className="menu-content">
                             <div className="search-wrap">
-                                <span className="search-icon">⌕</span>
+                                <span className="search-icon">
+                                    <SearchIcon />
+                                </span>
                                 <input
                                     className="input"
                                     type="search"
@@ -193,6 +226,17 @@ export default function MenuPage({ focusCanteenId, onClearFocus }) {
                                         setSearch(e.target.value)
                                     }
                                 />
+                            </div>
+
+                            <div className="chips">
+                                <button
+                                    type="button"
+                                    className={`chip veg-chip${vegOnly ? " active" : ""}`}
+                                    onClick={() => setVegOnly((v) => !v)}
+                                    aria-pressed={vegOnly}
+                                >
+                                    <span className="veg-dot veg" /> Veg only
+                                </button>
                             </div>
 
                             {listError && (
@@ -231,7 +275,7 @@ export default function MenuPage({ focusCanteenId, onClearFocus }) {
                                             {catItems.map((item) => (
                                                 <article
                                                     key={item._id}
-                                                    className={`product-card${item.isAvailable ? "" : " unavailable"}`}
+                                                    className={`product-card${item.isAvailable && inWindow(item) ? "" : " unavailable"}`}
                                                 >
                                                     <div className="product-media">
                                                         <Thumb item={item} />
@@ -242,6 +286,19 @@ export default function MenuPage({ focusCanteenId, onClearFocus }) {
                                                                 </span>
                                                             </div>
                                                         )}
+                                                        {item.isAvailable &&
+                                                            !inWindow(item) && (
+                                                                <div className="soldout-veil">
+                                                                    <span className="soldout-tag">
+                                                                        <ClockIcon /> {
+                                                                            item.availableFrom
+                                                                        }
+                                                                        –{
+                                                                            item.availableTo
+                                                                        }
+                                                                    </span>
+                                                                </div>
+                                                            )}
                                                     </div>
 
                                                     <div className="product-body">
@@ -275,7 +332,8 @@ export default function MenuPage({ focusCanteenId, onClearFocus }) {
                                                                 ₹{item.price}
                                                             </span>
                                                             {!item.isAvailable ||
-                                                            !item.canteen?.isOpen ? (
+                                                            !item.canteen?.isOpen ||
+                                                            !inWindow(item) ? (
                                                                 <button
                                                                     type="button"
                                                                     className="btn-add"
@@ -283,7 +341,15 @@ export default function MenuPage({ focusCanteenId, onClearFocus }) {
                                                                 >
                                                                     {!item.isAvailable
                                                                         ? "SOLD OUT"
-                                                                        : "CLOSED"}
+                                                                        : !item
+                                                                               .canteen?.isOpen
+                                                                            ? "CLOSED"
+                                                                            : `
+                                                                                 ${
+                                                                                     item.availableFrom
+                                                                                 }–${
+                                                                                     item.availableTo
+                                                                                 }`}
                                                                 </button>
                                                             ) : (cart.quantities[item._id] || 0) > 0 ? (
                                                                 <div className="stepper">
@@ -297,7 +363,7 @@ export default function MenuPage({ focusCanteenId, onClearFocus }) {
                                                                             )
                                                                         }
                                                                     >
-                                                                        −
+                                                                        <MinusIcon />
                                                                     </button>
                                                                     <span className="stepper-qty">
                                                                         {
@@ -316,7 +382,7 @@ export default function MenuPage({ focusCanteenId, onClearFocus }) {
                                                                             )
                                                                         }
                                                                     >
-                                                                        +
+                                                                        <PlusIcon />
                                                                     </button>
                                                                 </div>
                                                             ) : (

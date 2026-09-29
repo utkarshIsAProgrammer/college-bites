@@ -4,6 +4,16 @@ import { api } from "./api.js";
 import { useCanteen } from "./CanteenContext.jsx";
 import { useToast } from "./toast.jsx";
 import { uploadImage } from "./upload.js";
+import {
+    ClockIcon,
+    CloseIcon,
+    FoodIcon,
+    LeafIcon,
+    MeatIcon,
+    PencilIcon,
+    PauseIcon,
+    PlayIcon,
+} from "./icons.jsx";
 import VegDot from "./VegDot.jsx";
 
 const EMPTY_FORM = {
@@ -14,6 +24,8 @@ const EMPTY_FORM = {
     image: "",
     prepMins: "10",
     isVeg: true,
+    availableFrom: "",
+    availableTo: "",
 };
 
 /**
@@ -64,6 +76,8 @@ export default function MenuManager() {
             image: item.image ?? "",
             prepMins: item.prepMins ?? "10",
             isVeg: item.isVeg ?? true,
+            availableFrom: item.availableFrom ?? "",
+            availableTo: item.availableTo ?? "",
         });
         window.scrollTo({ top: 0, behavior: "smooth" });
     };
@@ -90,7 +104,7 @@ export default function MenuManager() {
         toast(
             result.stored === "inline"
                 ? "Stored inline — add Cloudinary keys for CDN hosting"
-                : "Image uploaded ✓",
+                : "Image uploaded",
         );
     };
 
@@ -107,6 +121,8 @@ export default function MenuManager() {
             image: form.image.trim(),
             prepMins: Math.max(0, Number(form.prepMins) || 0),
             isVeg: Boolean(form.isVeg),
+            availableFrom: form.availableFrom || "",
+            availableTo: form.availableTo || "",
         };
 
         if (
@@ -164,7 +180,23 @@ export default function MenuManager() {
         }
     };
 
+    // optimistic toggle — the sold-out veil appears instantly, rolls back if
+    // the server refuses; one toggle in flight per item
+    const [togglingId, setTogglingId] = useState(null);
+
     const handleToggle = async (item) => {
+        if (togglingId) return;
+        setTogglingId(item._id);
+
+        const snapshot = items;
+        setItems((prev) =>
+            prev.map((x) =>
+                x._id === item._id
+                    ? { ...x, isAvailable: !item.isAvailable }
+                    : x,
+            ),
+        );
+
         try {
             const res = await api(`/api/menu/${item._id}`, {
                 method: "PUT",
@@ -172,23 +204,20 @@ export default function MenuManager() {
                 body: { isAvailable: !item.isAvailable },
             });
             if (!res.ok) {
+                setItems(snapshot); // undo
                 toast(res.data.message || "Update failed", "error");
                 return;
             }
-            setItems((prev) =>
-                prev.map((x) =>
-                    x._id === item._id
-                        ? { ...x, isAvailable: !item.isAvailable }
-                        : x,
-                ),
-            );
             toast(
                 item.isAvailable
                     ? `“${item.name}” marked sold out`
                     : `“${item.name}” back in stock`,
             );
         } catch (err) {
+            setItems(snapshot);
             toast(err.message, "error");
+        } finally {
+            setTogglingId(null);
         }
     };
 
@@ -295,6 +324,43 @@ export default function MenuManager() {
                             />
                         </div>
                         <div className="field">
+                            <label className="label" htmlFor="mm-avail-from">
+                                Available window (optional)
+                            </label>
+                            <div className="time-window-row">
+                                <input
+                                    id="mm-avail-from"
+                                    className="input"
+                                    type="time"
+                                    aria-label="Available from"
+                                    value={form.availableFrom}
+                                    onChange={(e) =>
+                                        setForm({
+                                            ...form,
+                                            availableFrom: e.target.value,
+                                        })
+                                    }
+                                />
+                                <span className="time-window-dash">–</span>
+                                <input
+                                    className="input"
+                                    type="time"
+                                    aria-label="Available until"
+                                    value={form.availableTo}
+                                    onChange={(e) =>
+                                        setForm({
+                                            ...form,
+                                            availableTo: e.target.value,
+                                        })
+                                    }
+                                />
+                            </div>
+                            <p className="muted image-hint">
+                                Leave empty for all day — or set e.g. 11:00–14:00
+                                for lunch-only items.
+                            </p>
+                        </div>
+                        <div className="field">
                             <label className="label" htmlFor="mm-veg">
                                 Food type
                             </label>
@@ -309,8 +375,8 @@ export default function MenuManager() {
                                     })
                                 }
                             >
-                                <option value="veg">🌱 Veg</option>
-                                <option value="nonveg">🍗 Non-veg</option>
+                                <option value="veg">Veg</option>
+                                <option value="nonveg">Non-veg</option>
                             </select>
                         </div>
                     </div>
@@ -371,7 +437,8 @@ export default function MenuManager() {
                         </div>
                         <p className="muted image-hint">
                             Upload a file or paste any image link — a bad link
-                            just fades the preview, customers see the 🍽 fallback.
+                            just fades the preview, and customers see a plate
+                            icon as the fallback.
                         </p>
                     </div>
 
@@ -461,7 +528,9 @@ export default function MenuManager() {
                                                 }}
                                             />
                                         ) : (
-                                            <div className="thumb-fallback">🍽</div>
+                                            <div className="thumb-fallback">
+                                                <FoodIcon />
+                                            </div>
                                         )}
                                         {!item.isAvailable && (
                                             <div className="soldout-veil">
@@ -481,7 +550,13 @@ export default function MenuManager() {
                                                 }
                                                 onClick={() => handleToggle(item)}
                                             >
-                                                {item.isAvailable ? "⏸" : "▶"}
+                                                {togglingId === item._id ? (
+                                                    <ClockIcon size={13} />
+                                                ) : item.isAvailable ? (
+                                                    <PauseIcon size={13} />
+                                                ) : (
+                                                    <PlayIcon size={13} />
+                                                )}
                                             </button>
                                             <button
                                                 type="button"
@@ -489,7 +564,7 @@ export default function MenuManager() {
                                                 title="Edit"
                                                 onClick={() => startEdit(item)}
                                             >
-                                                ✎
+                                                <PencilIcon />
                                             </button>
                                             <button
                                                 type="button"
@@ -499,7 +574,7 @@ export default function MenuManager() {
                                                     handleDelete(item._id)
                                                 }
                                             >
-                                                ✕
+                                                <CloseIcon />
                                             </button>
                                         </div>
                                     </div>
@@ -512,6 +587,12 @@ export default function MenuManager() {
                                         {item.prepMins > 0 && (
                                             <p className="product-prep">
                                                 ~{item.prepMins} min
+                                            </p>
+                                        )}
+                                        {item.availableFrom && item.availableTo && (
+                                            <p className="product-prep">
+                                                <ClockIcon /> {item.availableFrom}
+                                                –{item.availableTo} only
                                             </p>
                                         )}
                                         {item.description && (

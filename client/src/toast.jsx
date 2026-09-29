@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useState } from "react";
+import { CheckIcon, CloseIcon } from "./icons.jsx";
 
 const ToastContext = createContext(() => {});
 
@@ -24,7 +25,11 @@ export function ToastProvider({ children }) {
                 {toasts.map(({ id, message, type }) => (
                     <div key={id} className={`toast${type === "error" ? " error" : ""}`}>
                         <span aria-hidden="true">
-                            {type === "error" ? "✕" : "✓"}
+                            {type === "error" ? (
+                                <CloseIcon size={14} />
+                            ) : (
+                                <CheckIcon size={14} />
+                            )}
                         </span>
                         {message}
                     </div>

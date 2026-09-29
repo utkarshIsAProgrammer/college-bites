@@ -19,12 +19,12 @@ import { CanteenProvider } from "./CanteenContext.jsx";
 import Reveal from "./Reveal.jsx";
 import { ToastProvider } from "./toast.jsx";
 import VendorPing from "./VendorPing.jsx";
+import ReadyPing from "./ReadyPing.jsx";
 import { useProfile } from "./ProfileContext.jsx";
 import { useCanteen } from "./CanteenContext.jsx";
 import useTheme from "./useTheme.js";
-import logoLockupUrl from "./assets/logo-lockup.svg";
-import logoLockupLightUrl from "./assets/logo-lockup-light.svg";
-import logoMarkLightUrl from "./assets/logo-mark-light.svg";
+import LogoLockup from "./LogoLockup.jsx";
+import PushSetup from "./PushSetup.jsx";
 
 const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
@@ -36,9 +36,9 @@ if (!clerkPubKey) {
 
 const clerkAppearance = {
     variables: {
-        colorPrimary: "#d75a1e",
-        fontFamily: "'Inter', system-ui, sans-serif",
-        borderRadius: "0.6rem",
+        colorPrimary: "#ff4f00",
+        fontFamily: "'Archivo', system-ui, sans-serif",
+        borderRadius: "0.4rem",
     },
 };
 
@@ -52,6 +52,35 @@ const VENDOR_TABS = [
     { key: "vendor-menu", label: "My Menu" },
     { key: "vendor", label: "My Canteen" },
 ];
+
+const MARQUEE_ITEMS = [
+    "Order ahead",
+    "Skip the queue",
+    "Pay by UPI or cash",
+    "Token in hand",
+    "Every canteen, one menu",
+    "Food meets you at the counter",
+];
+
+// Bucks-style marquee strip — pauses on hover, respects reduced motion
+function Marquee() {
+    const chunk = (key) => (
+        <div className="marquee-chunk" aria-hidden={key > 0}>
+            {MARQUEE_ITEMS.map((item) => (
+                <span key={item}>{item}</span>
+            ))}
+        </div>
+    );
+
+    return (
+        <div className="marquee" role="presentation">
+            <div className="marquee-track">
+                {chunk(0)}
+                {chunk(1)}
+            </div>
+        </div>
+    );
+}
 
 function SunIcon() {
     return (
@@ -122,7 +151,7 @@ function CartButton() {
                 <circle cx="19" cy="21" r="1" />
                 <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12" />
             </svg>
-            Cart
+            <span className="cart-label">Cart</span>
             {cart.count > 0 && <span className="cart-badge">{cart.count}</span>}
         </button>
     );
@@ -132,11 +161,7 @@ function TopBar({ theme, onToggleTheme }) {
     return (
         <header className="topbar">
             <div className="topbar-inner">
-                <img
-                    src={theme === "dark" ? logoLockupLightUrl : logoLockupUrl}
-                    alt="Rush Bites"
-                    className="topbar-logo"
-                />
+                <LogoLockup size={40} className="topbar-logo" />
                 <span className="topbar-date">
                     {new Date().toLocaleDateString(undefined, {
                         weekday: "long",
@@ -146,6 +171,7 @@ function TopBar({ theme, onToggleTheme }) {
                 </span>
                 <span className="topbar-meta">
                     <SignedIn>
+                        <PushSetup />
                         <CartButton />
                         <UserButton afterSignOutUrl="/" />
                     </SignedIn>
@@ -167,8 +193,8 @@ function TopBar({ theme, onToggleTheme }) {
 function Footer() {
     return (
         <footer className="footer">
-            © {new Date().getFullYear()} <strong>Rush Bites</strong> —
-            campus dining, pre-ordered.
+            © {new Date().getFullYear()} <strong>PrePlate</strong> — campus
+            dining, pre-ordered.
         </footer>
     );
 }
@@ -192,9 +218,7 @@ function Shell() {
     // tab appears once you're a vendor. Checks the canteen context too because
     // the synced role lags behind a fresh registration until the next sync.
     const isVendor = isStaff || Boolean(canteen);
-    const tabs = isVendor
-        ? [...CUSTOMER_TABS, ...VENDOR_TABS]
-        : CUSTOMER_TABS;
+    const tabs = isVendor ? [...CUSTOMER_TABS, ...VENDOR_TABS] : CUSTOMER_TABS;
 
     return (
         <>
@@ -203,12 +227,12 @@ function Shell() {
                     <Reveal>
                         <p className="eyebrow">Campus dining, pre-ordered</p>
                         <h1 className="display">
-                            Order ahead, <em>skip the queue</em>
+                            Skip the queue, <em>keep it hot</em>
                         </h1>
                         <p className="lede">
-                            Browse every canteen on campus, order from your
-                            seat, and pay by UPI or cash — your food meets you
-                            at the counter.
+                            Every canteen on campus, one loud little app. Order
+                            from your seat, pay by UPI or cash, and your food
+                            meets you at the counter — token in hand.
                         </p>
                     </Reveal>
                     <nav className="tabs" aria-label="Sections">
@@ -233,7 +257,7 @@ function Shell() {
                     ) : tab === "orders" ? (
                         <OrdersPage />
                     ) : tab === "canteens" ? (
-                        <CanteensPage onOpenCanteen={openCanteenMenu} />
+                        <CanteensPage onOpenCanteenMenu={openCanteenMenu} />
                     ) : tab === "vendor-menu" ? (
                         <MenuManager />
                     ) : (
@@ -249,26 +273,32 @@ function Shell() {
 
 function SignInScreen() {
     return (
-        <div className="auth-split">
+        <div className="auth-wrap">
+            <Marquee />
+            <div className="auth-split">
             <div className="auth-hero">
-                <div className="auth-hero-mark">
-                    <img src={logoMarkLightUrl} alt="" />
-                    Rush Bites
+                {/* the navbar's own LogoLockup at the same footprint as the
+                    old 46px mark — size 46 makes the mark artwork render at
+                    the same ~40px height it had before (the artwork spans
+                    ~87% of the lockup's viewBox); same fonts as the navbar;
+                    CSS keeps it light-inked on this always-dark hero */}
+                <LogoLockup size={46} tagline className="auth-hero-logo" />
+                    <p className="auth-hero-quote">
+                        Great meals, <em>zero queues.</em> Food that meets you
+                        at the counter — already paid, already prepared, still
+                        hot.
+                    </p>
+                    <p className="auth-hero-foot">
+                        Campus dining, pre-ordered · Est. 2026
+                    </p>
                 </div>
-                <p className="auth-hero-quote">
-                    Great meals, <em>zero queues.</em> Food that meets you at
-                    the counter — already paid, already prepared.
-                </p>
-                <p className="auth-hero-foot">
-                    Campus dining, pre-ordered · Est. 2026
-                </p>
-            </div>
-            <div className="auth-panel">
-                <div className="auth-panel-head">
-                    <h1>Welcome back</h1>
-                    <p>Sign in to continue to your console.</p>
+                <div className="auth-panel">
+                    <div className="auth-panel-head">
+                        <h1>Welcome back</h1>
+                        <p>Sign in to continue to your console.</p>
+                    </div>
+                    <SignIn signUpUrl="/sign-up" />
                 </div>
-                <SignIn signUpUrl="/sign-up" />
             </div>
         </div>
     );
@@ -292,8 +322,10 @@ export default function App() {
                     <ProfileProvider>
                         <CanteenProvider>
                             <CartProvider>
+                                <Marquee />
                                 <TopBar theme={theme} onToggleTheme={toggle} />
                                 <VendorPing />
+                                <ReadyPing />
                                 <Shell />
                             </CartProvider>
                         </CanteenProvider>

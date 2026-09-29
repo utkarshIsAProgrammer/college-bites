@@ -5,6 +5,21 @@ import { useCart } from "./CartContext.jsx";
 import { useToast } from "./toast.jsx";
 import PayModal from "./PayModal.jsx";
 import VegDot from "./VegDot.jsx";
+import useOverlayA11y from "./useOverlayA11y.js";
+import {
+    notificationPermission,
+    requestNotificationPermission,
+} from "./pwa.js";
+import {
+    BoltIcon,
+    CashIcon,
+    ClockIcon,
+    CloseIcon,
+    FoodIcon,
+    MinusIcon,
+    PlusIcon,
+    QrIcon,
+} from "./icons.jsx";
 
 function CartThumb({ item }) {
     const [failed, setFailed] = useState(false);
@@ -20,7 +35,11 @@ function CartThumb({ item }) {
             />
         );
     }
-    return <div className="cart-thumb cart-thumb-fallback">🍽</div>;
+    return (
+        <div className="cart-thumb cart-thumb-fallback">
+            <FoodIcon />
+        </div>
+    );
 }
 
 function Stepper({ qty, onAdd, onRemove }) {
@@ -32,7 +51,7 @@ function Stepper({ qty, onAdd, onRemove }) {
                 onClick={onRemove}
                 aria-label="Remove one"
             >
-                −
+                <MinusIcon />
             </button>
             <span className="stepper-qty">{qty}</span>
             <button
@@ -41,7 +60,7 @@ function Stepper({ qty, onAdd, onRemove }) {
                 onClick={onAdd}
                 aria-label="Add one"
             >
-                +
+                <PlusIcon />
             </button>
         </div>
     );
@@ -55,12 +74,15 @@ export default function CartDrawer() {
     const [placing, setPlacing] = useState(false);
     const [paymentMethod, setPaymentMethod] = useState("cash");
     const [pickupMins, setPickupMins] = useState("");
+    const [pickupChoice, setPickupChoice] = useState("asap"); // asap | later
     const [orderNote, setOrderNote] = useState("");
 
     // set right after a UPI order is placed, so we can hand the customer
     // straight to the scan-and-pay step instead of making them go find it
     const [placedOrder, setPlacedOrder] = useState(null);
     const [payCanteen, setPayCanteen] = useState(null);
+
+    const drawerRef = useOverlayA11y(cart.isOpen, cart.close);
 
     // earliest pickup estimate = 10 min from now
     const minPickup = new Date(Date.now() + 10 * 60_000);
@@ -97,7 +119,8 @@ export default function CartDrawer() {
                 canteen: canteen?._id,
                 paymentMethod,
                 ...(orderNote.trim() ? { note: orderNote.trim() } : {}),
-                ...(pickupMins
+                ...(pickupChoice === "later" &&
+                Number(pickupMins) >= 10
                     ? {
                           pickupAt: new Date(
                               Date.now() + Number(pickupMins) * 60_000,
@@ -119,6 +142,15 @@ export default function CartDrawer() {
 
         const order = res.data.order;
         const token = order?.tokenNumber;
+
+        // first order is the natural moment to ask for "food is ready"
+        // notifications — it's user-triggered and the value is obvious
+        if (notificationPermission() === "default") {
+            const perm = await requestNotificationPermission();
+            if (perm === "granted") {
+                toast("We'll ping you when your food is ready");
+            }
+        }
 
         cart.clear();
         cart.close();
@@ -154,10 +186,12 @@ export default function CartDrawer() {
                 aria-hidden="true"
             />
             <aside
+                ref={drawerRef}
                 className="drawer"
                 role="dialog"
                 aria-modal="true"
                 aria-label="Your cart"
+                tabIndex={-1}
             >
                 <header className="drawer-head">
                     <div>
@@ -174,7 +208,7 @@ export default function CartDrawer() {
                         onClick={cart.close}
                         aria-label="Close cart"
                     >
-                        ✕
+                        <CloseIcon />
                     </button>
                 </header>
 
@@ -231,7 +265,7 @@ export default function CartDrawer() {
                                             setPaymentMethod("cash")
                                         }
                                     >
-                                        💵 Cash at counter
+                                        <CashIcon /> Cash at counter
                                     </button>
                                     <button
                                         type="button"
@@ -240,27 +274,47 @@ export default function CartDrawer() {
                                             setPaymentMethod("upi_qr")
                                         }
                                     >
-                                        📷 UPI · QR
+                                        <QrIcon /> UPI · QR
                                     </button>
                                 </div>
                             </div>
 
                             <div className="field" style={{ margin: "0.9rem 0 0" }}>
-                                <label className="label" htmlFor="pickup-at">
-                                    Pick up in (minutes)
-                                </label>
-                                <input
-                                    id="pickup-at"
-                                    className="input"
-                                    type="number"
-                                    min="10"
-                                    step="5"
-                                    placeholder={`default · ~${fmtTime(minPickup)}`}
-                                    value={pickupMins}
-                                    onChange={(e) =>
-                                        setPickupMins(e.target.value)
-                                    }
-                                />
+                                <span className="label">Pickup time</span>
+                                <div className="pay-options">
+                                    <button
+                                        type="button"
+                                        className={`pay-option${pickupChoice === "asap" ? " active" : ""}`}
+                                        onClick={() => setPickupChoice("asap")}
+                                    >
+                                        <BoltIcon /> ASAP (~{fmtTime(minPickup)})
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={`pay-option${pickupChoice === "later" ? " active" : ""}`}
+                                        onClick={() => setPickupChoice("later")}
+                                    >
+                                        <ClockIcon size={14} /> Later
+                                    </button>
+                                </div>
+                                {pickupChoice === "later" && (
+                                    <input
+                                        id="pickup-at"
+                                        className="input"
+                                        style={{ marginTop: "0.5rem" }}
+                                        type="number"
+                                        min="10"
+                                        step="5"
+                                        placeholder={`Minutes from now (min 10) — e.g. 45 ≈ ${fmtTime(
+                                            new Date(Date.now() + 45 * 60_000),
+                                        )}`}
+                                        value={pickupMins}
+                                        onChange={(e) =>
+                                            setPickupMins(e.target.value)
+                                        }
+                                        aria-label="Pick up in minutes"
+                                    />
+                                )}
                             </div>
 
                             <div className="field" style={{ margin: "0.9rem 0 0" }}>

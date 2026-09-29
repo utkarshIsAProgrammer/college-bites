@@ -65,7 +65,14 @@ export function CanteenProvider({ children }) {
     }, [isSignedIn, refresh]);
 
     const register = useCallback(
-        async ({ name, description, location, contactName, contactPhone }) => {
+        async ({
+            name,
+            description,
+            location,
+            contactName,
+            contactPhone,
+            photo,
+        }) => {
             try {
                 const res = await api("/api/canteens", {
                     method: "POST",
@@ -76,6 +83,7 @@ export function CanteenProvider({ children }) {
                         location,
                         contactName,
                         contactPhone,
+                        ...(photo ? { photo } : {}),
                     },
                 });
                 if (res.ok && res.data.canteen) {

@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Rush Bites logo mark on dark backgrounds">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="PrePlate logo mark on dark backgrounds">
   <!-- ember morsel -->
-  <circle cx="32" cy="11.5" r="2.5" fill="#F7F4EE"/>
+  <circle cx="32" cy="11.5" r="2.5" fill="#D9D9D9"/>
 
   <!-- fork (tilted left) -->
-  <g fill="#F7F4EE" transform="rotate(-20 32 44)">
+  <g fill="#D9D9D9" transform="rotate(-20 32 44)">
     <rect x="24.75" y="10" width="2.5" height="14" rx="1.25"/>
     <rect x="30.75" y="10" width="2.5" height="14" rx="1.25"/>
     <rect x="36.75" y="10" width="2.5" height="14" rx="1.25"/>
@@ -12,7 +12,7 @@
   </g>
 
   <!-- spoon (tilted right, dark outline separates it from the fork) -->
-  <g fill="#F7F4EE" stroke="#14110C" stroke-width="1.5" transform="rotate(20 32 44)">
+  <g fill="#D9D9D9" stroke="#1a1a1a" stroke-width="1.5" transform="rotate(20 32 44)">
     <ellipse cx="32" cy="16.5" rx="6.2" ry="8.5"/>
     <rect x="29.75" y="27" width="4.5" height="27" rx="2.25"/>
   </g>

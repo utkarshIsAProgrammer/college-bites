@@ -3,12 +3,11 @@ import { useEffect, useState } from "react";
 const KEY = "cb-theme";
 
 function getInitial() {
-    if (typeof window === "undefined") return "light";
+    if (typeof window === "undefined") return "dark";
     const saved = window.localStorage.getItem(KEY);
     if (saved === "light" || saved === "dark") return saved;
-    return window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light";
+    // dark is the default (espresso hero mode) regardless of OS preference
+    return "dark";
 }
 
 export default function useTheme() {

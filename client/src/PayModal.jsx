@@ -4,10 +4,13 @@ import { api } from "./api.js";
 import { useToast } from "./toast.jsx";
 import UpiQr from "./UpiQr.jsx";
 import { buildUpiLink, formatRupees, orderPaymentRef } from "./upi.js";
+import useOverlayA11y from "./useOverlayA11y.js";
+import { CloseIcon } from "./icons.jsx";
 
 export default function PayModal({ order, canteen, onClose, onPaid }) {
     const { getToken } = useAuth();
     const toast = useToast();
+    const modalRef = useOverlayA11y(true, onClose);
 
     const [reference, setReference] = useState("");
     const [submitting, setSubmitting] = useState(false);
@@ -26,7 +29,7 @@ export default function PayModal({ order, canteen, onClose, onPaid }) {
         upiId,
         payeeName: canteen?.name,
         amount,
-        note: `Rush Bites #${order.tokenNumber ?? tr}`,
+        note: `PrePlate #${order.tokenNumber ?? tr}`,
         tr,
     });
 
@@ -78,10 +81,12 @@ export default function PayModal({ order, canteen, onClose, onPaid }) {
         <div className="drawer-root">
             <div className="drawer-backdrop" onClick={onClose} aria-hidden="true" />
             <aside
+                ref={modalRef}
                 className="drawer pay-drawer"
                 role="dialog"
                 aria-modal="true"
                 aria-label="Pay for your order"
+                tabIndex={-1}
             >
                 <header className="drawer-head">
                     <div>
@@ -97,7 +102,7 @@ export default function PayModal({ order, canteen, onClose, onPaid }) {
                         onClick={onClose}
                         aria-label="Close"
                     >
-                        ✕
+                        <CloseIcon />
                     </button>
                 </header>
 

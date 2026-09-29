@@ -1,5 +1,5 @@
 {
-  "name": "rushbites-client",
+  "name": "preplate-client",
   "private": true,
   "version": "0.0.1",
   "type": "module",
@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@clerk/clerk-react": "^5.46.0",
+    "lucide-react": "^1.48.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-qr-code": "^2.2.0"

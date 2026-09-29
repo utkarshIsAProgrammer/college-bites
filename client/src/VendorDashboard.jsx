@@ -1,30 +1,36 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/clerk-react";
 import { api } from "./api.js";
 import { useToast } from "./toast.jsx";
 import Reveal from "./Reveal.jsx";
 import { useCanteen } from "./CanteenContext.jsx";
+import PhotoPicker from "./PhotoPicker.jsx";
 import SetupChecklist from "./SetupChecklist.jsx";
 import TokenSlip from "./TokenSlip.jsx";
 import VendorSettings from "./VendorSettings.jsx";
 import VegDot from "./VegDot.jsx";
+import { canTransition, nextActions } from "./orderFlow.js";
+import {
+    AlertIcon,
+    BellIcon,
+    CheckIcon,
+    CloseIcon,
+    FlameIcon,
+    InboxIcon,
+    MaximizeIcon,
+    MonitorIcon,
+    NoteIcon,
+    PotIcon,
+    VolOffIcon,
+    VolOnIcon,
+} from "./icons.jsx";
+import { playKitchenChime } from "./sound.js";
+import {
+    notificationPermission,
+    requestNotificationPermission,
+} from "./pwa.js";
 
 const POLL_MS = 12000;
-
-const NEXT_ACTIONS = {
-    pending: [
-        { to: "accepted", label: "Accept" },
-        { to: "cancelled", label: "Reject" },
-    ],
-    accepted: [
-        { to: "preparing", label: "Start preparing" },
-        { to: "cancelled", label: "Reject" },
-    ],
-    preparing: [{ to: "ready", label: "Mark ready" }],
-    ready: [{ to: "completed", label: "Complete" }],
-    completed: [],
-    cancelled: [],
-};
 
 const STATUS_STYLES = {
     pending: "pill-amber",
@@ -82,9 +88,37 @@ export default function VendorDashboard() {
     // order currently rendered as a printable token slip
     const [slipOrder, setSlipOrder] = useState(null);
 
+    // kitchen display needs fullscreen; track the request so the "enter" button
+    // flips to "exit" when the browser actually goes fullscreen (Esc/ F11)
+    const [isFullscreen, setIsFullscreen] = useState(false);
+
+    // known order ids across polls — the diff is what triggers the chime
+    const knownOrderIds = useRef(null);
+
+    // per-action in-flight locks — one click = one request; double-taps are
+    // swallowed instead of firing duplicate (and second-invalid) API calls
+    const busyKeys = useRef(new Set());
+    const [, setBusyTick] = useState(0); // re-render trigger when locks change
+    const isBusy = (prefix, id) => busyKeys.current.has(`${prefix}:${id}`);
+
+    // "NEW ORDER" flash banner: shows on fresh orders, auto-clears, can be
+    // tapped to dismiss instantly
+    const [flash, setFlash] = useState(null); // null | { token, count }
+    const flashTimer = useRef(null);
+    const showFlash = (order) => {
+        setFlash((prev) => ({
+            token: prev ? `${prev.token} · #${order.tokenNumber}` : `#${order.tokenNumber}`,
+            count: (prev?.count || 0) + 1,
+        }));
+        clearTimeout(flashTimer.current);
+        flashTimer.current = setTimeout(() => setFlash(null), 8000);
+    };
+    useEffect(() => () => clearTimeout(flashTimer.current), []);
+
     const [soundOn, setSoundOn] = useState(
         () => localStorage.getItem("cb-order-sounds") !== "off",
     );
+    const [notifyPerm, setNotifyPerm] = useState(() => notificationPermission());
     const toggleSound = () => {
         setSoundOn((s) => {
             localStorage.setItem("cb-order-sounds", s ? "off" : "on");
@@ -97,6 +131,7 @@ export default function VendorDashboard() {
     const [regLocation, setRegLocation] = useState("");
     const [regContactName, setRegContactName] = useState("");
     const [regContactPhone, setRegContactPhone] = useState("");
+    const [regPhoto, setRegPhoto] = useState("");
     const [regBusy, setRegBusy] = useState(false);
 
     const handleRegister = async (e) => {
@@ -108,6 +143,7 @@ export default function VendorDashboard() {
             location: regLocation.trim(),
             contactName: regContactName.trim(),
             contactPhone: regContactPhone.trim(),
+            photo: regPhoto || undefined,
         });
         setRegBusy(false);
         if (result.ok) {
@@ -132,6 +168,32 @@ export default function VendorDashboard() {
             if (q.ok) {
                 setOrders(q.data.orders || []);
                 setError(null);
+
+                // kitchen chime — diff against the previous poll; one bell per
+                // poll even if several orders land together. Only sounds while
+                // the kitchen display is open (VendorPing owns the global alert).
+                const next = q.data.orders || [];
+                const ids = new Set(next.map((o) => o._id));
+                if (
+                    knownOrderIds.current &&
+                    document.body.dataset.kitchen === "1"
+                ) {
+                    const fresh = next.find(
+                        (o) =>
+                            !knownOrderIds.current.has(o._id) &&
+                            o.status !== "completed" &&
+                            o.status !== "cancelled",
+                    );
+                    if (fresh) {
+                        showFlash(fresh);
+                        if (
+                            localStorage.getItem("cb-order-sounds") !== "off"
+                        ) {
+                            playKitchenChime();
+                        }
+                    }
+                }
+                knownOrderIds.current = ids;
             } else {
                 setError(q.data.message || "Failed to load queue");
             }
@@ -151,32 +213,148 @@ export default function VendorDashboard() {
         return () => clearInterval(t);
     }, [load, canteen]);
 
+    // tell the rest of the app the kitchen display owns alerts right now
+    // (VendorPing reads this flag and stays quiet)
+    useEffect(() => {
+        if (servingMode) {
+            document.body.dataset.kitchen = "1";
+        } else {
+            delete document.body.dataset.kitchen;
+        }
+        return () => delete document.body.dataset.kitchen;
+    }, [servingMode]);
+
+    // ─── fullscreen for the counter tablet ───
+    const enterFullscreen = async () => {
+        try {
+            await document.documentElement.requestFullscreen();
+        } catch {
+            /* embedded/iframe or denied — the display still works inline */
+        }
+    };
+
+    useEffect(() => {
+        const onChange = () =>
+            setIsFullscreen(Boolean(document.fullscreenElement));
+        document.addEventListener("fullscreenchange", onChange);
+        return () =>
+            document.removeEventListener("fullscreenchange", onChange);
+    }, []);
+
+    // leaving kitchen mode also leaves fullscreen
+    useEffect(() => {
+        if (!servingMode && document.fullscreenElement) {
+            document.exitFullscreen().catch(() => {});
+        }
+    }, [servingMode]);
+
+    // Optimistic status change: the card moves the instant it's tapped, the
+    // server reconciles afterwards, and any failure rolls the UI right back.
     const setStatus = async (order, status) => {
-        const res = await api(`/api/orders/vendor/${order._id}/status`, {
-            method: "PATCH",
-            getToken,
-            body: { status },
-        });
-        if (!res.ok) {
-            toast(res.data.message || "Update failed", "error");
+        // impossible moves (e.g. completed → completed) never leave the client
+        if (!canTransition(order.status, status)) {
+            toast(
+                `Order #${order.tokenNumber} can't move from "${order.status}" to "${status}"`,
+                "error",
+            );
             return;
         }
-        toast(`Order #${order.tokenNumber} → ${status}`);
-        load();
+
+        const actionKey = `status:${order._id}`;
+        if (busyKeys.current.has(actionKey)) return;
+        busyKeys.current.add(actionKey);
+        setBusyTick((t) => t + 1);
+
+        const snapshot = orders;
+        setOrders((prev) =>
+            prev.map((o) =>
+                o._id === order._id ? { ...o, status } : o,
+            ),
+        );
+
+        try {
+            const res = await api(`/api/orders/vendor/${order._id}/status`, {
+                method: "PATCH",
+                getToken,
+                body: { status },
+            });
+            if (!res.ok) {
+                setOrders(snapshot); // undo — put the card back
+                toast(res.data.message || "Update failed", "error");
+                return;
+            }
+            // adopt the server's copy (token, timestamps, anything else)
+            if (res.data.order) {
+                const saved = res.data.order;
+                setOrders((prev) =>
+                    prev.map((o) =>
+                        o._id === order._id ? { ...o, ...saved } : o,
+                    ),
+                );
+            }
+            toast(`Order #${order.tokenNumber} → ${status}`);
+        } catch (err) {
+            setOrders(snapshot);
+            toast(err.message || "Update failed", "error");
+        } finally {
+            busyKeys.current.delete(actionKey);
+            setBusyTick((t) => t + 1);
+            load(); // quiet re-sync with the server's truth (+ fresh stats)
+        }
     };
 
     const confirmPayment = async (order, outcome) => {
-        const res = await api(`/api/orders/vendor/${order._id}/payment`, {
-            method: "PATCH",
-            getToken,
-            body: { outcome },
-        });
-        if (!res.ok) {
-            toast(res.data.message || "Failed", "error");
-            return;
+        if (order.payment?.state === outcome) return; // already settled
+
+        const actionKey = `pay:${order._id}`;
+        if (busyKeys.current.has(actionKey)) return;
+        busyKeys.current.add(actionKey);
+        setBusyTick((t) => t + 1);
+
+        const snapshot = orders;
+        setOrders((prev) =>
+            prev.map((o) =>
+                o._id === order._id
+                    ? {
+                          ...o,
+                          payment: { ...o.payment, state: outcome },
+                      }
+                    : o,
+            ),
+        );
+
+        try {
+            const res = await api(`/api/orders/vendor/${order._id}/payment`, {
+                method: "PATCH",
+                getToken,
+                body: { outcome },
+            });
+            if (!res.ok) {
+                setOrders(snapshot);
+                toast(res.data.message || "Failed", "error");
+                return;
+            }
+            if (res.data.order) {
+                const saved = res.data.order;
+                setOrders((prev) =>
+                    prev.map((o) =>
+                        o._id === order._id ? { ...o, ...saved } : o,
+                    ),
+                );
+            }
+            toast(
+                outcome === "confirmed"
+                    ? "Payment confirmed"
+                    : "Payment rejected",
+            );
+        } catch (err) {
+            setOrders(snapshot);
+            toast(err.message || "Failed", "error");
+        } finally {
+            busyKeys.current.delete(actionKey);
+            setBusyTick((t) => t + 1);
+            load();
         }
-        toast(outcome === "confirmed" ? "Payment confirmed" : "Payment rejected");
-        load();
     };
 
     const bulkToggle = async (isAvailable) => {
@@ -268,28 +446,33 @@ export default function VendorDashboard() {
                                         }
                                         required
                                     />
+                                </div>                                    <div className="field">
+                                        <label
+                                            className="label"
+                                            htmlFor="cn-contact-phone"
+                                        >
+                                            Contact number *
+                                        </label>
+                                        <input
+                                            id="cn-contact-phone"
+                                            className="input"
+                                            type="tel"
+                                            inputMode="numeric"
+                                            placeholder="e.g. 9876543210"
+                                            value={regContactPhone}
+                                            onChange={(e) =>
+                                                setRegContactPhone(e.target.value)
+                                            }
+                                            required
+                                        />
+                                    </div>
                                 </div>
-                                <div className="field">
-                                    <label
-                                        className="label"
-                                        htmlFor="cn-contact-phone"
-                                    >
-                                        Contact number *
-                                    </label>
-                                    <input
-                                        id="cn-contact-phone"
-                                        className="input"
-                                        type="tel"
-                                        inputMode="numeric"
-                                        placeholder="e.g. 9876543210"
-                                        value={regContactPhone}
-                                        onChange={(e) =>
-                                            setRegContactPhone(e.target.value)
-                                        }
-                                        required
-                                    />
-                                </div>
-                            </div>
+                            <PhotoPicker
+                                value={regPhoto}
+                                onChange={setRegPhoto}
+                                busy={regBusy}
+                                setBusy={setRegBusy}
+                            />
                             <button
                                 className="btn btn-accent"
                                 type="submit"
@@ -306,29 +489,203 @@ export default function VendorDashboard() {
         );
     }
 
-    // ─── counter display mode ───
+    // ─── kitchen display mode — full-screen counter view ───
     if (servingMode) {
+        const byToken = (a, b) => a.tokenNumber - b.tokenNumber;
         const ready = orders
             .filter((o) => o.status === "ready")
-            .sort((a, b) => a.tokenNumber - b.tokenNumber);
+            .sort(byToken);
+        const cooking = orders
+            .filter((o) => o.status === "preparing")
+            .sort(byToken);
+        const incoming = orders
+            .filter((o) => o.status === "pending" || o.status === "accepted")
+            .sort(byToken);
+        const itemCount = (o) =>
+            (o.items || []).reduce((s, i) => s + (i.quantity || 1), 0);
+
         return (
-            <section className="card serving-mode">
-                <div className="card-title">
-                    <h3 className="serving-title">
-                        {ready.length
-                            ? ready.map((o) => `#${o.tokenNumber}`).join("  ·  ")
-                            : "—"}
-                    </h3>
+            <section
+                className={`kitchen-root${
+                    isFullscreen ? " kitchen-fullscreen" : ""
+                }`}
+            >
+                {flash && (
                     <button
                         type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => setServingMode(false)}
+                        className="kitchen-flash"
+                        onClick={() => {
+                            clearTimeout(flashTimer.current);
+                            setFlash(null);
+                        }}
+                        aria-live="assertive"
                     >
-                        Exit
+                        <span className="kitchen-flash-text">
+                            <AlertIcon size={22} /> NEW ORDER — {flash.token}
+                        </span>
                     </button>
+                )}
+                <header className="kitchen-head">
+                    <div>
+                        <p className="eyebrow">{canteen.name} — kitchen</p>
+                        <h2 className="kitchen-title">Now serving</h2>
+                    </div>
+                    <div className="vendor-actions">
+                        {!isFullscreen && (
+                            <button
+                                type="button"
+                                className="btn btn-accent"
+                                onClick={enterFullscreen}
+                                title="Hide browser chrome — ideal for the counter tablet"
+                            >
+                                <MaximizeIcon /> Go fullscreen
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={() => setServingMode(false)}
+                        >
+                            Exit display
+                        </button>
+                    </div>
+                </header>
+
+                <div className="kitchen-now">
+                    {ready.length > 0 ? (
+                        ready.map((o) => (
+                            <div
+                                key={o._id}
+                                className="kitchen-token kitchen-ready"
+                            >
+                                <span className="kitchen-token-label">
+                                    Ready
+                                </span>
+                                <span className="kitchen-token-num">
+                                    #{o.tokenNumber}
+                                </span>
+                                <button
+                                    type="button"
+                                    className="kitchen-act kitchen-act-done"
+                                    onClick={() => setStatus(o, "completed")}
+                                    disabled={
+                                        !canTransition(o.status, "completed") ||
+                                        isBusy("status", o._id)
+                                    }
+                                >
+                                    <CheckIcon /> Picked up
+                                </button>
+                            </div>
+                        ))
+                    ) : (
+                        <div className="kitchen-token kitchen-idle">
+                            <span className="kitchen-token-num">—</span>
+                            <span className="kitchen-token-label">
+                                Nothing ready yet
+                            </span>
+                        </div>
+                    )}
                 </div>
-                <p className="muted serving-hint">
-                    Now serving — ready tokens refresh automatically.
+
+                <div className="kitchen-cols">
+                    <div className="kitchen-col">
+                        <h4>
+                            <span className="kitchen-col-icon"><PotIcon /></span> Cooking ({cooking.length})
+                        </h4>
+                        {cooking.length === 0 && (
+                            <p className="kitchen-empty">Nothing on the stove</p>
+                        )}
+                        <ul>
+                            {cooking.map((o) => (
+                                <li key={o._id} className="kitchen-row">
+                                    <b>#{o.tokenNumber}</b>
+                                    <span>{itemCount(o)} items</span>
+                                    <button
+                                        type="button"
+                                        className="kitchen-act kitchen-act-ready"
+                                        onClick={() => setStatus(o, "ready")}
+                                        disabled={
+                                            !canTransition(o.status, "ready") ||
+                                            isBusy("status", o._id)
+                                        }
+                                    >
+                                        Ready
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                    <div className="kitchen-col">
+                        <h4>
+                            <span className="kitchen-col-icon"><InboxIcon /></span> Incoming ({incoming.length})
+                        </h4>
+                        {incoming.length === 0 && (
+                            <p className="kitchen-empty">Queue is clear</p>
+                        )}
+                        <ul>
+                            {incoming.map((o) => (
+                                <li key={o._id} className="kitchen-row">
+                                    <b>#{o.tokenNumber}</b>
+                                    <span>{itemCount(o)} items</span>
+                                    <span className="kitchen-row-actions">
+                                        {o.status === "pending" && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    className="kitchen-act kitchen-act-go"
+                                                    onClick={() =>
+                                                        setStatus(o, "accepted")
+                                                    }
+                                                    disabled={
+                                                        !canTransition(o.status, "accepted") ||
+                                                        isBusy("status", o._id)
+                                                    }
+                                                >
+                                                    Accept
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="kitchen-act kitchen-act-no"
+                                                    onClick={() =>
+                                                        setStatus(o, "cancelled")
+                                                    }
+                                                    disabled={
+                                                        !canTransition(o.status, "cancelled") ||
+                                                        isBusy("status", o._id)
+                                                    }
+                                                    aria-label="Reject order"
+                                                >
+                                                    <CloseIcon />
+                                                </button>
+                                            </>
+                                        )}
+                                        {o.status === "accepted" && (
+                                            <button
+                                                type="button"
+                                                className="kitchen-act kitchen-act-go"
+                                                onClick={() =>
+                                                    setStatus(o, "preparing")
+                                                }
+                                                disabled={
+                                                    !canTransition(o.status, "preparing") ||
+                                                    isBusy("status", o._id)
+                                                }
+                                            >
+                                                Start cooking
+                                            </button>
+                                        )}
+                                    </span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                </div>
+
+                <p className="kitchen-hint">
+                    {isFullscreen
+                        ? "Press Esc to leave fullscreen."
+                        : "Tip: go fullscreen for the counter tablet."}{" "}
+                    New orders ring the chime — auto-refreshes every 12s.
                 </p>
             </section>
         );
@@ -376,14 +733,41 @@ export default function VendorDashboard() {
                                 title="Toggle new-order sound"
                                 aria-pressed={soundOn}
                             >
-                                {soundOn ? "🔊 On" : "🔇 Off"}
+                                {soundOn ? (
+                                    <>
+                                        <VolOnIcon /> On
+                                    </>
+                                ) : (
+                                    <>
+                                        <VolOffIcon /> Off
+                                    </>
+                                )}
                             </button>
+                            {notifyPerm === "default" && (
+                                <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    title="Get system notifications for new orders — even when this tab is in the background"
+                                    onClick={async () => {
+                                        const perm =
+                                            await requestNotificationPermission();
+                                        setNotifyPerm(perm);
+                                        if (perm === "granted") {
+                                            toast(
+                                                "Order notifications enabled",
+                                            );
+                                        }
+                                    }}
+                                >
+                                    <BellIcon /> Enable alerts
+                                </button>
+                            )}
                             <button
                                 type="button"
                                 className="btn btn-secondary btn-sm"
                                 onClick={() => setServingMode(true)}
                             >
-                                Counter display
+                                <MonitorIcon /> Kitchen display
                             </button>
                         </div>
                     </div>
@@ -456,7 +840,7 @@ export default function VendorDashboard() {
 
                                 {order.note && (
                                     <p className="order-note order-note-vendor">
-                                        📝 {order.note}
+                                        <NoteIcon /> {order.note}
                                     </p>
                                 )}
 
@@ -468,6 +852,7 @@ export default function VendorDashboard() {
                                         <button
                                             type="button"
                                             className="btn btn-accent btn-sm"
+                                            disabled={isBusy("pay", order._id)}
                                             onClick={() =>
                                                 confirmPayment(order, "confirmed")
                                             }
@@ -477,6 +862,7 @@ export default function VendorDashboard() {
                                         <button
                                             type="button"
                                             className="btn btn-ghost-danger btn-sm"
+                                            disabled={isBusy("pay", order._id)}
                                             onClick={() =>
                                                 confirmPayment(order, "failed")
                                             }
@@ -487,25 +873,28 @@ export default function VendorDashboard() {
                                 )}
 
                                 <div className="order-actions">
-                                    {(NEXT_ACTIONS[order.status] || []).map(
-                                        (a) => (
-                                            <button
-                                                key={a.to}
-                                                type="button"
-                                                className={`btn btn-sm ${a.to === "cancelled" ? "btn-ghost-danger" : "btn-primary"}`}
-                                                onClick={() =>
-                                                    setStatus(order, a.to)
-                                                }
-                                            >
-                                                {a.label}
-                                            </button>
-                                        ),
-                                    )}
+                                    {/* only ever render moves the flow allows
+                                        — completed/cancelled render nothing */}
+                                    {nextActions(order.status).map((a) => (
+                                        <button
+                                            key={a.to}
+                                            type="button"
+                                            className={`btn btn-sm ${a.to === "cancelled" ? "btn-ghost-danger" : "btn-primary"}`}
+                                            disabled={isBusy("status", order._id)}
+                                            onClick={() =>
+                                                setStatus(order, a.to)
+                                            }
+                                        >
+                                            {a.label}
+                                        </button>
+                                    ))}
                                     {order.payment?.state !== "confirmed" &&
+                                        order.payment?.state !== "failed" &&
                                         order.status !== "cancelled" && (
                                             <button
                                                 type="button"
                                                 className="btn btn-secondary btn-sm"
+                                                disabled={isBusy("pay", order._id)}
                                                 onClick={() =>
                                                     confirmPayment(order, "confirmed")
                                                 }
@@ -561,13 +950,13 @@ export default function VendorDashboard() {
                             <span className="stat-num">
                                 {stats?.orders ?? "—"}
                             </span>
-                            <span className="stat-label">orders</span>
+                            <span className="stat-label">orders today</span>
                         </div>
                         <div className="stat-card">
                             <span className="stat-num">
                                 ₹{stats?.revenue ?? "—"}
                             </span>
-                            <span className="stat-label">revenue</span>
+                            <span className="stat-label">revenue today</span>
                         </div>
                         <div className="stat-card">
                             <span className="stat-num">
@@ -577,9 +966,80 @@ export default function VendorDashboard() {
                         </div>
                     </div>
 
+                    {stats?.trend?.length > 0 && (
+                        <div className="insights-row">
+                            <div className="insight-box">
+                                <p className="stat-label">Last 7 days</p>
+                                <div
+                                    className="trend-chart"
+                                    role="img"
+                                    aria-label={`Orders per day over the last 7 days, peaking at ${Math.max(
+                                        ...stats.trend.map((d) => d.orders),
+                                    )}`}
+                                >
+                                    {stats.trend.map((d) => {
+                                        const max = Math.max(
+                                            ...stats.trend.map((x) => x.orders),
+                                            1,
+                                        );
+                                        return (
+                                            <div
+                                                key={d.day}
+                                                className="trend-col"
+                                                title={`${d.day}: ${d.orders} orders · ₹${d.revenue}`}
+                                            >
+                                                <div
+                                                    className="trend-bar"
+                                                    style={{
+                                                        height: `${Math.max(
+                                                            (d.orders / max) * 100,
+                                                            d.orders ? 8 : 2,
+                                                        )}%`,
+                                                    }}
+                                                />
+                                                <span className="trend-day">
+                                                    {d.day[0]}
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                            <div className="insight-box">
+                                <p className="stat-label">Busy hours (2 wks)</p>
+                                {stats.peakHours?.length > 0 ? (
+                                    <ul className="peak-list">
+                                        {stats.peakHours.map((p) => (
+                                            <li key={p.hour}>
+                                                <strong>{p.label}</strong>
+                                                <span>
+                                                    {p.orders} order
+                                                    {p.orders === 1 ? "" : "s"}
+                                                </span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                ) : (
+                                    <p className="muted">Not enough data yet</p>
+                                )}
+                                {stats.totalWeek > 0 && (
+                                    <p className="muted insight-foot">
+                                        {stats.cancelled} of {stats.totalWeek}{" "}
+                                        cancelled (
+                                        {Math.round(
+                                            (stats.cancelled / stats.totalWeek) *
+                                                100,
+                                        )}
+                                        %)
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
                     {stats?.topItems?.length > 0 && (
                         <>
-                            <p className="eyebrow">Top sellers</p>
+                            <p className="eyebrow">Top sellers today</p>
                             <ul className="order-items">
                                 {stats.topItems.map((t) => (
                                     <li key={t._id}>

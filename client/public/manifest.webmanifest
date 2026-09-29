@@ -1,0 +1,17 @@
+{
+    "name": "PrePlate — Campus dining, pre-ordered",
+    "short_name": "PrePlate",
+    "description": "Browse every canteen, order ahead, pay by UPI or cash, skip the queue.",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#1a1a1a",
+    "theme_color": "#222222",
+    "icons": [
+        {
+            "src": "/favicon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any"
+        }
+    ]
+}

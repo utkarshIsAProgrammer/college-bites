@@ -30,7 +30,7 @@ export default function ConnectionBanner() {
             const res = await fetch(`${API_BASE}/api/health`);
 
             if (res.ok) {
-                if (wasDown.current) toast("Back online ✓");
+                if (wasDown.current) toast("Back online");
                 wasDown.current = false;
                 setState("ok");
             } else {

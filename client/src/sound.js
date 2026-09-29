@@ -50,6 +50,17 @@ export function playNewOrderSound() {
     tone(880, 0.16, 0.25);
 }
 
+export function playKitchenChime() {
+    // insistent kitchen bell — a bright triad struck twice, loud enough to
+    // cut through counter noise without being harsh
+    tone(880, 0, 0.16, 0.08);
+    tone(1108, 0.14, 0.16, 0.08);
+    tone(1318, 0.28, 0.42, 0.08);
+    tone(880, 0.75, 0.16, 0.08);
+    tone(1108, 0.89, 0.16, 0.08);
+    tone(1318, 1.03, 0.5, 0.08);
+}
+
 export function playReadySound() {
     // gentle three-note chime — "your food is up"
     tone(523, 0, 0.15);

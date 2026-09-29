@@ -1,5 +1,6 @@
 import { useCanteen } from "./CanteenContext.jsx";
 import Reveal from "./Reveal.jsx";
+import { CheckIcon } from "./icons.jsx";
 
 /**
  * Three steps between signing up and taking the first order. A new vendor is
@@ -54,7 +55,7 @@ export default function SetupChecklist() {
                             className={`setup-step${step.done ? " done" : ""}`}
                         >
                             <span className="setup-mark" aria-hidden="true">
-                                {step.done ? "✓" : ""}
+                                {step.done && <CheckIcon size={11} />}
                             </span>
                             <div>
                                 <p className="setup-label">{step.label}</p>

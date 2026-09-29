@@ -2,9 +2,37 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#222222" />
+    <meta
+      name="description"
+      content="PrePlate — campus dining, pre-ordered. Browse every canteen, order ahead, pay by UPI or cash, skip the queue."
+    />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>Rush Bites — Campus dining, pre-ordered</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <title>PrePlate — Campus dining, pre-ordered</title>
+    <script>
+      // Set theme before first paint — dark (espresso hero mode) is the default
+      (function () {
+        try {
+          var saved = localStorage.getItem("cb-theme");
+          var theme =
+            saved === "light" || saved === "dark"
+              ? saved
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "dark";
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.style.background =
+            theme === "dark" ? "#1a1a1a" : "#d9d9d9";
+        } catch (e) {
+          document.documentElement.dataset.theme = "dark";
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

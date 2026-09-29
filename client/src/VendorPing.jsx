@@ -4,6 +4,7 @@ import { api } from "./api.js";
 import { useCanteen } from "./CanteenContext.jsx";
 import { useToast } from "./toast.jsx";
 import { playNewOrderSound } from "./sound.js";
+import { showNotification } from "./pwa.js";
 
 const POLL_MS = 10_000;
 
@@ -41,8 +42,22 @@ export default function VendorPing() {
                 if (knownIds.current) {
                     for (const o of next) {
                         if (!knownIds.current.has(o._id)) {
-                            toast(`🔔 New order #${o.tokenNumber}`);
-                            if (prefersSound()) playNewOrderSound();
+                            toast(`New order #${o.tokenNumber}`);
+                            // kitchen display rings its own louder chime —
+                            // don't double up with the standard beep
+                            if (
+                                prefersSound() &&
+                                document.body.dataset.kitchen !== "1"
+                            ) {
+                                playNewOrderSound();
+                            }
+                            // vendor isn't looking at the tab? system-level nudge
+                            if (document.hidden) {
+                                showNotification(
+                                    `New order #${o.tokenNumber}`,
+                                    `${o.canteen?.name || "Your canteen"} — ₹${o.totalAmount}`,
+                                );
+                            }
                         }
                     }
                 }

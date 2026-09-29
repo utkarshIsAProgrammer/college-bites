@@ -6,6 +6,7 @@ import { uploadImage } from "./upload.js";
 import { buildUpiLink } from "./upi.js";
 import UpiQr from "./UpiQr.jsx";
 import Reveal from "./Reveal.jsx";
+import { PinIcon } from "./icons.jsx";
 
 const EMPTY = {
     name: "",
@@ -73,7 +74,7 @@ export default function VendorSettings() {
         if (result.stored === "inline") {
             toast("Stored inline — add Cloudinary keys for CDN hosting");
         } else {
-            toast("Image uploaded ✓");
+            toast("Image uploaded");
         }
     };
 
@@ -214,7 +215,11 @@ export default function VendorSettings() {
 
                 {(canteen.location || canteen.contactName) && (
                     <p className="muted vendor-meta">
-                        {canteen.location && <>📍 {canteen.location} · </>}
+                        {canteen.location && (
+                            <>
+                                <PinIcon /> {canteen.location} ·{" "}
+                            </>
+                        )}
                         {canteen.contactName && (
                             <>
                                 {canteen.contactName}
@@ -302,7 +307,7 @@ export default function VendorSettings() {
                                                   upiId: form.upiId.trim(),
                                                   payeeName: form.name,
                                                   amount: 100,
-                                                  note: "Rush Bites preview",
+                                                  note: "PrePlate preview",
                                               })
                                             : ""
                                     }

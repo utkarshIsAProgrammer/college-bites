@@ -6,6 +6,14 @@ import { useToast } from "./toast.jsx";
 import PayModal from "./PayModal.jsx";
 import { useCart } from "./CartContext.jsx";
 import { playReadySound } from "./sound.js";
+import { canTransition } from "./orderFlow.js";
+import {
+    CheckIcon,
+    NoteIcon,
+    QueueIcon,
+    RepeatIcon,
+    StarIcon,
+} from "./icons.jsx";
 import VegDot from "./VegDot.jsx";
 
 const STATUS_STYLES = {
@@ -29,7 +37,7 @@ const STATUS_LABELS = {
 const PAY_LABELS = {
     pending: "Payment pending",
     submitted: "Ref. submitted",
-    confirmed: "Paid ✓",
+    confirmed: "Paid",
     failed: "Payment failed",
 };
 
@@ -114,24 +122,44 @@ export default function OrdersPage() {
         return () => clearInterval(t);
     }, [load]);
 
+    // optimistic cancel — the card flips to "Cancelled" instantly and rolls
+    // back if the server refuses; one cancel in flight per order
+    const [cancellingId, setCancellingId] = useState(null);
+
     const handleCancel = async (order) => {
+        if (cancellingId) return;
+        if (!canTransition(order.status, "cancelled")) {
+            toast(
+                `Order #${order.tokenNumber ?? ""} can no longer be cancelled`,
+                "error",
+            );
+            return;
+        }
+
+        setCancellingId(order._id);
+        const snapshot = orders;
+        setOrders((prev) =>
+            prev.map((o) =>
+                o._id === order._id ? { ...o, status: "cancelled" } : o,
+            ),
+        );
+
         try {
             const res = await api(`/api/orders/${order._id}/cancel`, {
                 method: "PATCH",
                 getToken,
             });
             if (!res.ok) {
+                setOrders(snapshot); // undo
                 toast(res.data.message || "Cancel failed", "error");
                 return;
             }
-            setOrders((prev) =>
-                prev.map((o) =>
-                    o._id === order._id ? { ...o, status: "cancelled" } : o,
-                ),
-            );
             toast(`Order #${order.tokenNumber ?? ""} cancelled`);
         } catch (err) {
+            setOrders(snapshot);
             toast(err.message, "error");
+        } finally {
+            setCancellingId(null);
         }
     };
 
@@ -171,7 +199,9 @@ export default function OrdersPage() {
                 o._id === reviewFor._id ? { ...o, reviewed: true } : o,
             ),
         );
-        toast(`Thanks — ${rating}★ logged for ${reviewFor.canteen?.name || "this canteen"}`);
+        toast(
+            `Thanks — rated ${rating}/5 for ${reviewFor.canteen?.name || "this canteen"}`,
+        );
         setReviewFor(null);
     };
 
@@ -304,7 +334,8 @@ export default function OrdersPage() {
                                             order.status,
                                         ) && (
                                             <span className="order-eta">
-                                                👤 {order.queueAhead ?? 0} ahead
+                                                <span className="order-eta-icon"><QueueIcon /></span>{" "}
+                                                {order.queueAhead ?? 0} ahead
                                                 · ready ~
                                                 {fmtTime(
                                                     order.estimatedReadyAt,
@@ -366,7 +397,9 @@ export default function OrdersPage() {
                                 </ul>
 
                                 {order.note && (
-                                    <p className="order-note">📝 {order.note}</p>
+                                    <p className="order-note">
+                                        <NoteIcon /> {order.note}
+                                    </p>
                                 )}
 
                                 {(canPay ||
@@ -388,11 +421,20 @@ export default function OrdersPage() {
                                             <button
                                                 type="button"
                                                 className="btn btn-ghost-danger btn-sm"
+                                                disabled={
+                                                    cancellingId === order._id ||
+                                                    !canTransition(
+                                                        order.status,
+                                                        "cancelled",
+                                                    )
+                                                }
                                                 onClick={() =>
                                                     handleCancel(order)
                                                 }
                                             >
-                                                Cancel
+                                                {cancellingId === order._id
+                                                    ? "Cancelling…"
+                                                    : "Cancel"}
                                             </button>
                                         )}
                                         {order.status === "completed" && (
@@ -401,7 +443,7 @@ export default function OrdersPage() {
                                                 className="btn btn-secondary btn-sm"
                                                 onClick={() => reorder(order)}
                                             >
-                                                🔁 Reorder
+                                                <RepeatIcon /> Reorder
                                             </button>
                                         )}
                                     </div>
@@ -428,7 +470,7 @@ export default function OrdersPage() {
                                                             setRating(n)
                                                         }
                                                     >
-                                                        ★
+                                                        <StarIcon size={18} />
                                                     </button>
                                                 ))}
                                                 <span className="muted review-scale">
@@ -472,7 +514,7 @@ export default function OrdersPage() {
                                         </form>
                                     ) : order.reviewed ? (
                                         <p className="order-reviewed">
-                                            Reviewed ✓
+                                            <CheckIcon size={12} /> Reviewed
                                         </p>
                                     ) : (
                                         <div className="order-actions">
@@ -483,7 +525,7 @@ export default function OrdersPage() {
                                                     openReview(order)
                                                 }
                                             >
-                                                ★ Rate this order
+                                                <StarIcon /> Rate this order
                                             </button>
                                         </div>
                                     ))}

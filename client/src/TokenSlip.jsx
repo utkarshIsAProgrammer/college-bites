@@ -1,5 +1,6 @@
 import UpiQr from "./UpiQr.jsx";
 import { buildUpiLink, formatRupees, orderPaymentRef } from "./upi.js";
+import useOverlayA11y from "./useOverlayA11y.js";
 
 /**
  * Printable token slip — token number, items, total, and a QR with the exact
@@ -10,13 +11,14 @@ import { buildUpiLink, formatRupees, orderPaymentRef } from "./upi.js";
  * rest of the app so only the sheet lands on paper.
  */
 export default function TokenSlip({ order, canteen, onClose }) {
+    const slipRef = useOverlayA11y(true, onClose);
     const tr = orderPaymentRef(order);
 
     const upiLink = buildUpiLink({
         upiId: canteen?.upiId,
         payeeName: canteen?.name,
         amount: order.totalAmount,
-        note: `Rush Bites #${order.tokenNumber ?? tr}`,
+        note: `PrePlate #${order.tokenNumber ?? tr}`,
         tr,
     });
 
@@ -35,15 +37,17 @@ export default function TokenSlip({ order, canteen, onClose }) {
                 aria-hidden="true"
             />
             <div
+                ref={slipRef}
                 className="slip-wrap"
                 role="dialog"
                 aria-modal="true"
                 aria-label="Token slip"
+                tabIndex={-1}
             >
                 <div className="slip-sheet">
                     <header className="slip-head">
                         <div>
-                            <p className="slip-brand">Rush Bites</p>
+                            <p className="slip-brand">PrePlate</p>
                             <p className="slip-canteen">{canteen?.name}</p>
                         </div>
                         <div className="slip-token">
